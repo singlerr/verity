@@ -1,0 +1,32 @@
+# Rust
+/target/
+**/*.rs.bk
+Cargo.lock
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Build artifacts
+*.pdb
+*.ilk
+
+# Environment
+.env
+.env.local
+
+.claude/
+.design/
+.opencode/
+.sisyphus/
+AGENTS.md
+IMPLEMENTATION.md
+PLAN.md
+opencode.json
