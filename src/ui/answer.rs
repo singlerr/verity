@@ -16,7 +16,7 @@ pub fn render_answer(frame: &mut Frame, area: Rect, app: &App) {
     let colors = ColorScheme::default();
 
     let status_str = match app.state {
-        AppState::Idle | AppState::Planning | AppState::Researching => "pending",
+        AppState::Idle | AppState::Classifying | AppState::Planning | AppState::Researching => "pending",
         AppState::AnswerReady => "done",
         AppState::Error(_) => "error",
     };
@@ -31,22 +31,23 @@ pub fn render_answer(frame: &mut Frame, area: Rect, app: &App) {
             Style::default().fg(colors.dim),
         )]));
         frame.render_widget(
-            Paragraph::new(lines).style(Style::default().bg(colors.bg)),
+            Paragraph::new(lines)
+                .style(Style::default().fg(colors.ink).bg(colors.bg)),
             area,
         );
         return;
     }
 
-    // Concatenate answer chunk text and render as markdown
     let content: String = app.answer_chunks.iter().map(|ch| ch.text.as_str()).collect();
-    let inner_width = area.width.saturating_sub(1).max(1);
+    let inner_width = area.width.saturating_sub(2).max(1);
     let md_lines = render_markdown(&content, inner_width);
 
-    // Prepend pane title + blank, then markdown lines
     let all_lines: Vec<Line> = lines.into_iter().chain(md_lines).collect();
 
     frame.render_widget(
-        Paragraph::new(all_lines).style(Style::default().bg(colors.bg)),
+        Paragraph::new(all_lines)
+            .style(Style::default().fg(colors.ink).bg(colors.bg))
+            .scroll((app.answer_scroll, 0)),
         area,
     );
 }

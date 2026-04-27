@@ -26,12 +26,14 @@ struct OllamaMessage {
 }
 #[derive(Debug, Deserialize)]
 struct ChatResponse {
+    #[serde(rename = "model")]
     _model: String,
     message: ResponseMessage,
     done: bool,
 }
 #[derive(Debug, Deserialize)]
 struct ResponseMessage {
+    #[serde(rename = "role")]
     _role: String,
     content: String,
 }

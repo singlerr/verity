@@ -1,12 +1,11 @@
 use std::sync::Arc;
-use std::time::Instant;
 
-use serde_json::json;
-
-use crate::app::{PlanStep, Source, AnswerChunk, Tool as PlanTool};
+use crate::app::{PlanStep, Source, AnswerChunk};
 use crate::agent::planner::AgentPlanner;
 use crate::agent::tools::ToolRegistry;
 use crate::llm::provider::{ProviderRegistry, Role};
+use tokio_util::sync::CancellationToken;
+use crate::agent::classifier::QueryClassifier;
 
 use std::sync::mpsc;
 
@@ -29,6 +28,8 @@ pub enum AgentEvent {
     Done(Answer),
     Error(String),
     ModelListReady(Vec<String>),
+    Classified(crate::agent::classifier::QueryIntent),
+    SearchingIteration { current: u8, max: u8, query: String },
 }
 
 pub struct AgentOrchestrator {
@@ -36,16 +37,27 @@ pub struct AgentOrchestrator {
     tools: ToolRegistry,
     provider_registry: Arc<ProviderRegistry>,
     model: String,
+    classifier: QueryClassifier,
 }
 
 impl AgentOrchestrator {
-    pub fn new(planner: AgentPlanner, tools: ToolRegistry, provider_registry: Arc<ProviderRegistry>, model: String) -> Self {
-        Self { planner, tools, provider_registry, model }
+    pub fn new(
+        planner: AgentPlanner,
+        tools: ToolRegistry,
+        provider_registry: Arc<ProviderRegistry>,
+        model: String,
+    ) -> Self {
+        // Lightweight default classifier construction; allows main.rs to compile with 4 args
+        let classifier = QueryClassifier::new(provider_registry.clone(), model.clone());
+        Self { planner, tools, provider_registry, model, classifier }
     }
 
-    pub async fn run(&self, query: &str, tx: mpsc::Sender<AgentEvent>) {
+    pub async fn run(&self, query: &str, tx: mpsc::Sender<AgentEvent>, cancel_token: CancellationToken) {
+        // Phase 1: classify the query
+        let classified = self.classifier.classify(query).await;
+        let _ = tx.send(AgentEvent::Classified(classified.intent.clone()));
         // 1) Plan
-        let steps = match self.planner.plan(query).await {
+        let steps = match self.planner.plan(query, Some(&classified)).await {
             Ok(s) => s,
             Err(e) => {
                 let _ = tx.send(AgentEvent::Error(format!("Planner failed: {:?}", e)));
@@ -55,93 +67,70 @@ impl AgentOrchestrator {
         let steps_clone = steps.clone();
         let _ = tx.send(AgentEvent::PlanReady(steps_clone));
 
-        // 2) Execute steps sequentially
+        // Check cancellation after planning
+        if cancel_token.is_cancelled() {
+            let _ = tx.send(AgentEvent::Error("Query cancelled".to_string()));
+            return;
+        }
+
+        // 2) Execute steps sequentially via the extracted executor.
         let mut all_sources: Vec<Source> = Vec::new();
+        let mut step_outputs: Vec<String> = Vec::new();
         for (idx, step) in steps.into_iter().enumerate() {
-            let _ = tx.send(AgentEvent::StepStarted(idx));
-            let _start = Instant::now();
-
-            match step.tool {
-                PlanTool::Search => {
-                    if let Some(tool) = self.tools.get("search") {
-                        let input = json!({"query": step.title});
-                        match tool.execute(&input).await {
-                            Ok(val) => {
-                                if let Some(results) = val.as_array() {
-                                    for (i, item) in results.iter().enumerate() {
-                                        let title = item.get("title").and_then(|v| v.as_str()).unwrap_or("");
-                                        let url = item.get("url").and_then(|v| v.as_str()).unwrap_or("");
-                                        let snippet = item.get("snippet").and_then(|v| v.as_str()).unwrap_or("");
-                                        let domain = extract_domain(url);
-                                        let src = Source {
-                                            num: all_sources.len() + i + 1,
-                                            domain,
-                                            title: title.to_string(),
-                                            url: url.to_string(),
-                                            snippet: snippet.to_string(),
-                                            quote: String::new(),
-                                        };
-                                        all_sources.push(src.clone());
-                                        let _ = tx.send(AgentEvent::SourceFound(src));
-                                    }
-                                } else {
-                                    let _ = tx.send(AgentEvent::StepFailed(idx, "Search: unexpected response".to_string()));
-                                }
-                                let _ = tx.send(AgentEvent::StepDone(idx));
-                            }
-                            Err(e) => {
-                                let _ = tx.send(AgentEvent::StepFailed(idx, format!("Search tool failed: {}", e)));
-                            }
-                        }
-                    } else {
-                        let _ = tx.send(AgentEvent::StepFailed(idx, "Search tool not found".to_string()));
-                    }
-                }
-                PlanTool::Read => {
-                    if let Some(tool) = self.tools.get("read_url") {
-                        if let Some(first) = all_sources.first() {
-                            let input = json!({"url": first.url});
-                            match tool.execute(&input).await {
-                                Ok(_v) => {
-                                    let _ = tx.send(AgentEvent::StepDone(idx));
-                                }
-                                Err(e) => {
-                                    let _ = tx.send(AgentEvent::StepFailed(idx, format!("Read tool failed: {}", e)));
-                                }
-                            }
-                        } else {
-                            let _ = tx.send(AgentEvent::StepProgress(idx, "No sources to read".to_string()));
-                            let _ = tx.send(AgentEvent::StepDone(idx));
-                        }
-                    } else {
-                        let _ = tx.send(AgentEvent::StepFailed(idx, "Read tool not found".to_string()));
-                    }
-                }
-                PlanTool::Think => {
-                    let _ = tx.send(AgentEvent::StepProgress(idx, "Thinking...".to_string()));
-                    let _ = tx.send(AgentEvent::StepDone(idx));
-                }
-                PlanTool::Edit | PlanTool::Shell => {
-                    let _ = tx.send(AgentEvent::StepProgress(idx, "Skipped".to_string()));
-                    let _ = tx.send(AgentEvent::StepDone(idx));
-                }
+            if cancel_token.is_cancelled() {
+                let _ = tx.send(AgentEvent::Error("Query cancelled".to_string()));
+                return;
             }
+            if let Some(out) = crate::agent::executor::execute_step(&step, idx, &self.tools, &mut all_sources, &tx).await {
+                step_outputs.push(out);
+            }
+        }
 
-            let _dur = _start.elapsed();
-            let _ = _dur;
+        // Check cancellation before synthesis
+        if cancel_token.is_cancelled() {
+            let _ = tx.send(AgentEvent::Error("Query cancelled".to_string()));
+            return;
         }
 
         // 3) Synthesis via LLM provider
         if let Some(provider_handle) = self.provider_registry.resolve(&self.model) {
+            // Load and apply stored credentials
+            let provider_name = {
+                let lock = provider_handle.read().await;
+                lock.name().to_string()
+            };
+            if let Ok(cred_store) = crate::auth::store::CredentialStore::load() {
+                if let Some(creds) = cred_store.get(&provider_name) {
+                    let mut w = provider_handle.write().await;
+                    let _ = w.authenticate(&creds.api_key).await;
+                }
+            }
             let provider_lock = provider_handle.write().await;
+            let manifest = crate::agent::tool_manifest();
             let mut messages: Vec<crate::llm::provider::Message> = Vec::new();
             messages.push(crate::llm::provider::Message {
                 role: Role::System,
-                content: "You are an AI research assistant.".to_string(),
+                content: format!(
+                    "You are an AI coding and research assistant.\n{manifest}\n\
+                     Answer concisely and accurately.\n\
+                     Every factual claim MUST be backed by a citation: \
+                     use `[filename]` for local files and `[url]` for web sources. \
+                     If no evidence was gathered, say so explicitly.",
+                ),
             });
-            let mut synth = format!("Query: {}\nSources:\n", query);
-            for s in &all_sources {
-                synth.push_str(&format!("- {} {}\n", s.title, s.url));
+            let mut synth = format!("Query: {}\n", query);
+            if !step_outputs.is_empty() {
+                synth.push_str("\nGathered context:\n");
+                for out in &step_outputs {
+                    synth.push_str(out);
+                    synth.push('\n');
+                }
+            }
+            if !all_sources.is_empty() {
+                synth.push_str("\nWeb sources:\n");
+                for s in &all_sources {
+                    synth.push_str(&format!("- {} {}\n", s.title, s.url));
+                }
             }
             messages.push(crate::llm::provider::Message { role: Role::User, content: synth });
 
@@ -171,14 +160,5 @@ impl AgentOrchestrator {
         } else {
             let _ = tx.send(AgentEvent::Error("No provider for model".to_string()));
         }
-    }
-}
-
-fn extract_domain(url: &str) -> String {
-    if let Some(pos) = url.find("://") {
-        let rest = &url[(pos+3)..];
-        rest.split('/').next().unwrap_or("").to_string()
-    } else {
-        String::new()
     }
 }

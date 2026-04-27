@@ -19,8 +19,18 @@ pub fn render_status_bar(f: &mut Frame, area: Rect, app: &App) {
             "\u{25cf}", // ●
             Style::default().fg(colors.success).add_modifier(Modifier::BOLD),
         ),
-        AppState::Planning | AppState::Researching => (
-            "searching",
+        AppState::Classifying => (
+            "analyzing intent\u{2026}",
+            app.spinner.frame(),
+            Style::default().fg(colors.accent).add_modifier(Modifier::BOLD),
+        ),
+        AppState::Planning => (
+            "planning\u{2026}",
+            app.spinner.frame(),
+            Style::default().fg(colors.accent).add_modifier(Modifier::BOLD),
+        ),
+        AppState::Researching => (
+            "searching\u{2026}",
             app.spinner.frame(),
             Style::default().fg(colors.accent).add_modifier(Modifier::BOLD),
         ),
@@ -31,9 +41,10 @@ pub fn render_status_bar(f: &mut Frame, area: Rect, app: &App) {
         ),
     };
 
-    // Elapsed time
-    let elapsed = app.start_time
-        .map(|t| format!("{}s", t.elapsed().as_secs()))
+    // Elapsed time: frozen final value after done, live counter while running
+    let elapsed = app.elapsed
+        .map(|d| format!("{}s", d.as_secs()))
+        .or_else(|| app.start_time.map(|t| format!("{}s", t.elapsed().as_secs())))
         .unwrap_or_else(|| "\u{2014}".to_string()); // —
 
     let sep = Span::styled(" \u{b7} ", Style::default().fg(colors.dim)); // ·
@@ -50,11 +61,11 @@ pub fn render_status_bar(f: &mut Frame, area: Rect, app: &App) {
         Span::styled(format!("model: {}", app.active_model), Style::default().fg(colors.dim)),
     ];
 
-    // Right side hints — change when command bar is focused
-    let hints = if app.focus == crate::app::Focus::Command {
-        "\u{23ce} submit \u{b7} Esc cancel"
-    } else {
-        "j/k select \u{b7} / command \u{b7} m model \u{b7} \u{2303}K new"
+    // Right side hints — change based on current focus
+    let hints = match app.focus {
+        crate::app::Focus::Command => "\u{23ce} submit \u{b7} Esc cancel",
+        crate::app::Focus::Left    => "j/k sources \u{b7} Tab answer \u{b7} / cmd \u{b7} m model",
+        crate::app::Focus::Right   => "j/k scroll \u{b7} Tab sources \u{b7} / cmd \u{b7} m model",
     };
     let right_span = Span::styled(hints, Style::default().fg(colors.dim));
 

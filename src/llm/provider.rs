@@ -60,6 +60,10 @@ impl ProviderRegistry {
     self.providers.insert(name, Arc::new(RwLock::new(provider)));
   }
 
+  pub fn get(&self, name: &str) -> Option<ProviderHandle> {
+    self.providers.get(name).cloned()
+  }
+
   // Resolve a provider based on a model prefix routing rule
   pub fn resolve(&self, model: &str) -> Option<ProviderHandle> {
     let key = if model.starts_with("gpt-") {

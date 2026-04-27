@@ -1,90 +1,11 @@
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 // Import AgentEvent type for wiring agent events into the UI
 use crate::agent::orchestrator::AgentEvent;
 use crate::ui::spinner::Spinner;
 
-#[derive(Debug, Clone, PartialEq)]
-pub enum Mode {
-    Research,
-    Code,
-}
-
-#[derive(Debug, Clone, PartialEq)]
-pub enum StepStatus {
-    Queued,
-    Running,
-    Done,
-}
-
-#[derive(Debug, Clone, PartialEq)]
-pub enum Tool {
-    Search,
-    Read,
-    Think,
-    Edit,
-    Shell,
-}
-
-#[derive(Debug, Clone, PartialEq)]
-pub enum LineKind {
-    Cmd,
-    Out,
-    Ok,
-    Dim,
-}
-
-// Global UI state for the agent-driven workflow
-#[derive(Debug, Clone, PartialEq)]
-pub enum AppState {
-    Idle,
-    Planning,
-    Researching,
-    AnswerReady,
-    Error(String),
-}
-
-#[derive(Debug, Clone)]
-pub struct PlanStep {
-    pub id: String,
-    pub title: String,
-    pub tool: Tool,
-    pub status: StepStatus,
-    pub duration: Option<f64>,
-    pub thoughts: Vec<String>,
-}
-
-#[derive(Debug, Clone)]
-pub struct Source {
-    pub num: usize,
-    pub domain: String,
-    pub title: String,
-    pub url: String,
-    pub snippet: String,
-    pub quote: String,
-}
-
-#[derive(Debug, Clone)]
-pub struct AnswerChunk {
-    pub text: String,
-    pub is_code: bool,
-    pub is_bold: bool,
-    pub is_em: bool,
-    pub citations: Vec<usize>,
-}
-
-#[derive(Debug, Clone)]
-pub struct TerminalLine {
-    pub kind: LineKind,
-    pub text: String,
-}
-
-#[derive(Debug, Clone, PartialEq)]
-pub enum Focus {
-    Left,
-    Right,
-    Command,
-}
+pub mod types;
+pub use types::*;
 
 #[derive(Debug, Clone)]
 pub struct App {
@@ -100,12 +21,14 @@ pub struct App {
     pub selected_source: Option<usize>,
     pub running: bool,
     pub start_time: Option<Instant>,
+    pub elapsed: Option<Duration>,
     pub spinner: Spinner,
     pub autocomplete_idx: usize,
     pub model_select_open: bool,
     pub model_list: Vec<String>,
     pub selected_model_idx: usize,
     pub active_model: String,
+    pub answer_scroll: u16,
 }
 
 impl App {
@@ -124,12 +47,14 @@ impl App {
             selected_source: None,
             running: true,
             start_time: None,
+            elapsed: None,
             spinner: Spinner::new(),
             autocomplete_idx: 0,
             model_select_open: false,
             model_list: Vec::new(),
             selected_model_idx: 0,
             active_model: config.active_model,
+            answer_scroll: 0,
         }
     }
 
@@ -172,6 +97,8 @@ impl App {
                 self.answer_chunks.push(chunk);
             }
             AgentEvent::Done(_answer) => {
+                self.elapsed = self.start_time.map(|t| t.elapsed());
+                self.start_time = None;
                 self.state = AppState::AnswerReady;
             }
             AgentEvent::Error(msg) => {
@@ -179,6 +106,16 @@ impl App {
             }
             AgentEvent::ModelListReady(models) => {
                 self.model_list = models;
+            }
+            AgentEvent::Classified(_intent) => {
+            self.state = AppState::Classifying;
+            }
+            AgentEvent::SearchingIteration { current, max, query } => {
+                self.state = AppState::Researching;
+                self.trace_lines.push(TerminalLine {
+                    kind: LineKind::Out,
+                    text: format!("Searching ({}/{}) for: {}", current, max, query),
+                });
             }
         }
     }
@@ -197,6 +134,8 @@ impl App {
             self.trace_lines.clear();
             self.plan_steps.clear();
             self.start_time = Some(Instant::now());
+            self.elapsed = None;
+            self.answer_scroll = 0;
         }
     }
 }

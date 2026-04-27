@@ -20,7 +20,7 @@ pub fn render_plan(frame: &mut Frame, area: Rect, app: &App, spinner: &Spinner) 
     // PaneTitle: ▎ AGENT ─────── running/idle
     let status_str = match app.state {
         AppState::Idle | AppState::AnswerReady => "idle",
-        AppState::Planning | AppState::Researching => "running",
+        AppState::Classifying | AppState::Planning | AppState::Researching => "running",
         AppState::Error(_) => "error",
     };
     lines.push(pane_title("AGENT", status_str, area.width, &colors));
@@ -121,10 +121,12 @@ fn render_steps<'a>(steps: &'a [PlanStep], colors: &'a ColorScheme, spinner: &Sp
 
 fn tool_label(tool: &Tool) -> &'static str {
     match tool {
-        Tool::Search => "search",
-        Tool::Read   => "read",
-        Tool::Think  => "think",
-        Tool::Edit   => "edit",
-        Tool::Shell  => "shell",
+        Tool::Search  => "search",
+        Tool::Read    => "read",
+        Tool::Think   => "think",
+        Tool::Edit    => "edit",
+        Tool::Shell   => "shell",
+        Tool::ReadFile => "read_file",
+        Tool::ListDir  => "list_dir",
     }
 }

@@ -14,13 +14,10 @@ use super::layout::ColorScheme;
 pub fn render_trace(frame: &mut Frame, area: Rect, app: &crate::app::App) {
     let colors = ColorScheme::default();
 
-    let mut lines: Vec<Line> = Vec::new();
-
-    // Section label
-    lines.push(Line::from(vec![Span::styled(
+    let label_line = Line::from(vec![Span::styled(
         "trace.log",
         Style::default().fg(colors.dim),
-    )]));
+    )]);
 
     // Build log entry lines (last N entries to fill available rows)
     // area.height - 1 for the label row, -2 for block borders
@@ -48,7 +45,7 @@ pub fn render_trace(frame: &mut Frame, area: Rect, app: &crate::app::App) {
     };
 
     frame.render_widget(
-        Paragraph::new(lines[0].clone()).style(Style::default().bg(colors.bg)),
+        Paragraph::new(label_line.clone()).style(Style::default().bg(colors.bg)),
         label_area,
     );
 

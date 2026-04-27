@@ -1,5 +1,10 @@
 //! Agent tool implementations for search, URL reading, and file reading.
 
+pub mod registry;
+pub mod local;
+pub use registry::{build_tool_registry, tool_manifest};
+pub use local::{WriteFileTool, ListDirTool, ShellTool};
+
 use crate::fs::read::read_file;
 use crate::search::{SearchEngine, SearchResult};
 use anyhow::{Context, Result};
@@ -104,12 +109,6 @@ impl Tool for ReadUrlTool {
     }
 }
 
-impl Default for ReadUrlTool {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
 /// Tool for reading local files.
 pub struct ReadFileTool;
 
@@ -149,12 +148,6 @@ impl Tool for ReadFileTool {
     }
 }
 
-impl Default for ReadFileTool {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
 /// Registry for managing and dispatching tools.
 pub struct ToolRegistry {
     tools: HashMap<String, Arc<dyn Tool>>,
@@ -183,13 +176,4 @@ impl Default for ToolRegistry {
     }
 }
 
-/// Build a ToolRegistry with default tools configured.
-pub fn build_tool_registry(searxng_url: &str) -> ToolRegistry {
-    use crate::search::SearXngClient;
-    let mut registry = ToolRegistry::new();
-    let search_engine: Arc<dyn SearchEngine> = Arc::new(SearXngClient::new(searxng_url));
-    registry.register(SearchTool::new(search_engine));
-    registry.register(ReadUrlTool::new());
-    registry.register(ReadFileTool::new());
-    registry
-}
+
