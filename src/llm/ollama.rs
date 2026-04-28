@@ -1,4 +1,4 @@
-use crate::llm::provider::{Chunk, LlmProvider, Message, ProviderError, Role};
+use crate::llm::provider::{Chunk, LlmProvider, Message, ProviderError, Role, ToolDefinition, ToolResponse};
 use async_trait::async_trait;
 use futures::StreamExt;
 use serde::{Deserialize, Serialize};
@@ -12,13 +12,6 @@ pub struct OllamaProvider {
     authenticated: bool,
 }
 
-#[derive(Debug, Serialize)]
-#[allow(dead_code)]
-struct ChatRequest {
-    model: String,
-    messages: Vec<OllamaMessage>,
-    stream: bool,
-}
 #[derive(Debug, Serialize)]
 struct OllamaMessage {
     role: String,
@@ -176,6 +169,8 @@ impl LlmProvider for OllamaProvider {
         let body: TagsResponse = response.json().await.map_err(|e| format!("Parse error: {}", e))?;
         Ok(body.models.into_iter().map(|m| m.name).collect())
     }
+
+    async fn complete_with_tools(&self, _messages: &[Message], _tools: &[ToolDefinition], _model: &str) -> Result<ToolResponse, ProviderError> { Err("Tool calling not supported by this provider".into()) }
 }
 impl Default for OllamaProvider {
     fn default() -> Self {

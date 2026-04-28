@@ -2,6 +2,7 @@ use std::time::{Duration, Instant};
 
 // Import AgentEvent type for wiring agent events into the UI
 use crate::agent::orchestrator::AgentEvent;
+use crate::agent::researcher::ResearchDepth;
 use crate::ui::spinner::Spinner;
 
 pub mod types;
@@ -29,6 +30,7 @@ pub struct App {
     pub selected_model_idx: usize,
     pub active_model: String,
     pub answer_scroll: u16,
+    pub research_depth: ResearchDepth,
 }
 
 impl App {
@@ -55,6 +57,7 @@ impl App {
             selected_model_idx: 0,
             active_model: config.active_model,
             answer_scroll: 0,
+            research_depth: ResearchDepth::default(),
         }
     }
 

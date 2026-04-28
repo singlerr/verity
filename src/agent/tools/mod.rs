@@ -149,6 +149,7 @@ impl Tool for ReadFileTool {
 }
 
 /// Registry for managing and dispatching tools.
+#[derive(Clone)]
 pub struct ToolRegistry {
     tools: HashMap<String, Arc<dyn Tool>>,
 }

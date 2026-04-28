@@ -1,4 +1,4 @@
-use crate::llm::provider::{Chunk, LlmProvider, Message, ProviderError, Role};
+use crate::llm::provider::{Chunk, LlmProvider, Message, ProviderError, Role, ToolDefinition, ToolResponse};
 use async_trait::async_trait;
 use futures::StreamExt;
 use serde::{Deserialize, Serialize};
@@ -145,6 +145,15 @@ impl LlmProvider for AnthropicProvider {
     }
 
     self.parse_sse_stream(response).await
+  }
+
+  async fn complete_with_tools(
+      &self,
+      _messages: &[Message],
+      _tools: &[ToolDefinition],
+      _model: &str,
+  ) -> Result<ToolResponse, ProviderError> {
+      Err("Tool calling not supported by this provider".into())
   }
 
   fn name(&self) -> &str {

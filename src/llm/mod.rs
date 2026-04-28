@@ -12,6 +12,7 @@ pub use openai::OpenAiProvider;
 pub use ollama::OllamaProvider;
 pub use provider::{
     Chunk, LlmProvider, Message, ProviderError, ProviderHandle, ProviderRegistry, Role,
+    ToolDefinition, ToolCall, ToolResponse, ToolResult, FinishReason, TokenUsage,
 };
 
 /// Build a registry with all available providers registered.

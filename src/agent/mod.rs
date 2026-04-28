@@ -10,8 +10,12 @@ pub mod classifier;
 pub mod executor;
 
 pub use classifier::{QueryIntent, ClassifiedIntent};
-pub use executor::StepResult;
+
+pub mod researcher;
+pub use researcher::{ResearcherContext, ResearcherMessage, ResearchDepth};
 
 // Expose orchestrator and common event types for MVP
+pub mod synthesizer;
+
 pub mod orchestrator;
 pub use orchestrator::{AgentOrchestrator, AgentEvent, Answer};

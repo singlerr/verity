@@ -3,6 +3,26 @@ use serde::Deserialize;
 use crate::llm::provider::{Message, Role, ProviderRegistry};
 use crate::auth::store::CredentialStore;
 
+#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SourceType {
+    General,
+    News,
+    Science,
+    It,
+}
+
+impl SourceType {
+    pub fn as_searxng_category(&self) -> &'static str {
+        match self {
+            SourceType::General => "general",
+            SourceType::News => "news",
+            SourceType::Science => "science",
+            SourceType::It => "it",
+        }
+    }
+}
+
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum QueryIntent {
@@ -17,6 +37,8 @@ pub struct ClassifiedIntent {
     pub intent: QueryIntent,
     pub search_queries: Vec<String>,
     pub reasoning: String,
+    pub skip_search: bool,
+    pub source_types: Vec<SourceType>,
 }
 
 /// Intent classifier using a registered LLM provider
@@ -34,8 +56,15 @@ impl QueryClassifier {
     }
 
     pub async fn classify(&self, query: &str) -> ClassifiedIntent {
-        // System prompt (exact content)
-        let system_prompt = "You are an intent classifier. Given a user query, classify it into exactly one of:\n- direct_answer: Factual questions, math, definitions that need no external data\n- web_research: Questions requiring current web information, news, latest data\n- local_analysis: Questions about local files, codebase, current project\n- mixed: Questions needing both local analysis AND web research\n\nRespond ONLY with JSON: {\"intent\":\"direct_answer|web_research|local_analysis|mixed\",\"search_queries\": [\"query1\",\"query2\"],\"reasoning\":\"brief explanation\"}\n\nIMPORTANT: For web_research or mixed, provide 1-3 specific, reformulated search queries that will find the BEST results. NEVER copy the raw user query as a search query";
+        let system_prompt = "You are an intent classifier. Given a user query, classify it into exactly one of:
+- direct_answer: Factual questions, math, definitions that need no external data
+- web_research: Questions requiring current web information, news, latest data
+- local_analysis: Questions about local files, codebase, current project
+- mixed: Questions needing both local analysis AND web research
+
+Respond ONLY with JSON: {\"intent\":\"direct_answer|web_research|local_analysis|mixed\",\"search_queries\":[\"query1\",\"query2\"],\"reasoning\":\"brief explanation\",\"skip_search\":false,\"source_types\":[\"general\",\"news\",\"science\",\"it\"]}
+
+IMPORTANT: For web_research or mixed, provide 1-3 specific, reformulated search queries. NEVER copy the raw user query. Set skip_search to true only for direct_answer. Set source_types to filter SearXNG categories (general, news, science, it).";
         let system = Message {
             role: Role::System,
             content: system_prompt.to_string(),
@@ -46,9 +75,7 @@ impl QueryClassifier {
         };
         let messages = vec![system, user];
 
-        // LLM call following planner pattern
         if let Some(provider_handle) = self.provider_registry.resolve(&self.model) {
-            // Load credentials and authenticate
             let provider_name = {
                 let lock = provider_handle.read().await;
                 lock.name().to_string()
@@ -62,7 +89,6 @@ impl QueryClassifier {
             let provider_guard = provider_handle.read().await;
             if let Ok(chunks) = provider_guard.stream_completion(&messages, &self.model).await {
                 let json_str: String = chunks.into_iter().map(|c| c.content).collect::<String>();
-                // Strip markdown code fences if present
                 let mut json_text = json_str.trim().to_string();
                 if json_text.starts_with("```json") {
                     json_text = json_text
@@ -77,34 +103,63 @@ impl QueryClassifier {
                     intent: QueryIntent,
                     search_queries: Vec<String>,
                     reasoning: String,
+                    skip_search: Option<bool>,
+                    source_types: Option<Vec<SourceType>>,
                 }
                 if let Ok(resp) = serde_json::from_str::<ClassifierResponse>(&json_text) {
                     return ClassifiedIntent {
                         intent: resp.intent,
                         search_queries: resp.search_queries,
                         reasoning: resp.reasoning,
+                        skip_search: resp.skip_search.unwrap_or(false),
+                        source_types: resp.source_types.unwrap_or_else(|| vec![SourceType::General]),
                     };
                 } else {
-                    // Fallback on parse failure
                     return ClassifiedIntent {
                         intent: QueryIntent::WebResearch,
                         search_queries: vec![query.to_string()],
                         reasoning: "classification fallback: web_research".to_string(),
+                        skip_search: false,
+                        source_types: vec![SourceType::General],
                     };
                 }
             }
         }
-        // Global fallback
         ClassifiedIntent {
             intent: QueryIntent::WebResearch,
             search_queries: vec![query.to_string()],
             reasoning: "classification fallback: web_research".to_string(),
+            skip_search: false,
+            source_types: vec![SourceType::General],
         }
     }
 }
 
 #[cfg(test)]
 mod tests {
+    use super::*;
+
+    #[test]
+    fn source_type_mapping() {
+        assert_eq!(SourceType::General.as_searxng_category(), "general");
+        assert_eq!(SourceType::News.as_searxng_category(), "news");
+        assert_eq!(SourceType::Science.as_searxng_category(), "science");
+        assert_eq!(SourceType::It.as_searxng_category(), "it");
+    }
+
+    #[test]
+    fn fallback_defaults() {
+        let fallback = ClassifiedIntent {
+            intent: QueryIntent::WebResearch,
+            search_queries: vec!["test".to_string()],
+            reasoning: "fallback".to_string(),
+            skip_search: false,
+            source_types: vec![SourceType::General],
+        };
+        assert!(!fallback.skip_search);
+        assert_eq!(fallback.source_types, vec![SourceType::General]);
+    }
+
     #[test]
     fn parse_valid_web_research() {
         let json = r#"{"intent":"web_research","search_queries":["rust async"],"reasoning":"test"}"#;

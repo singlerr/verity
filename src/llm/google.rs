@@ -3,7 +3,7 @@ use async_trait::async_trait;
 use reqwest::{Client, StatusCode};
 use serde::{Deserialize, Serialize};
 
-use crate::llm::provider::{Chunk, LlmProvider, Message, ProviderError, Role};
+use crate::llm::provider::{Chunk, LlmProvider, Message, ProviderError, Role, ToolDefinition, ToolResponse};
 
 pub struct GoogleProvider {
     api_key: Option<String>,
@@ -174,6 +174,8 @@ impl LlmProvider for GoogleProvider {
 
         Ok(chunks)
     }
+
+    async fn complete_with_tools(&self, _messages: &[Message], _tools: &[ToolDefinition], _model: &str) -> Result<ToolResponse, ProviderError> { Err("Tool calling not supported by this provider".into()) }
 
     fn name(&self) -> &str { "google" }
     fn is_authenticated(&self) -> bool { self.api_key.is_some() }
