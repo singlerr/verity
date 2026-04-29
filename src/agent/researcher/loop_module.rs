@@ -500,6 +500,7 @@ fn extract_domain(url: &str) -> String {
 mod tests {
     use super::*;
     use crate::llm::provider::mock::MockLlmProvider;
+    use crate::llm::provider::ToolResponse;
 
     fn make_tool_call(name: &str, args: &str) -> ToolCall {
         ToolCall {

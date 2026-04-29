@@ -42,6 +42,7 @@ pub enum AgentEvent {
 struct ProviderHandleAdapter {
     handle: ProviderHandle,
     name_str: String,
+    supports_tool_calling: bool,
 }
 
 impl ProviderHandleAdapter {
@@ -49,12 +50,21 @@ impl ProviderHandleAdapter {
         Self {
             handle,
             name_str: "provider".to_string(),
+            supports_tool_calling: false,
         }
     }
     fn new_with_name(handle: ProviderHandle, name: String) -> Self {
         Self {
             handle,
             name_str: name,
+            supports_tool_calling: false,
+        }
+    }
+    fn new_with_support(handle: ProviderHandle, name: String, supports_tool_calling: bool) -> Self {
+        Self {
+            handle,
+            name_str: name,
+            supports_tool_calling,
         }
     }
 }
@@ -97,7 +107,7 @@ impl LlmProvider for ProviderHandleAdapter {
         lock.list_models().await
     }
     fn supports_tool_calling(&self) -> bool {
-        matches!(self.name_str.as_str(), "openai" | "nvidia")
+        self.supports_tool_calling
     }
 }
 
@@ -165,15 +175,20 @@ impl AgentOrchestrator {
                 let _ = w.authenticate(&creds.api_key).await;
             }
         }
-        let provider: Arc<dyn LlmProvider> = Arc::new(ProviderHandleAdapter::new_with_name(
+        let tool_calling = {
+            let lock = provider_handle.read().await;
+            lock.supports_tool_calling()
+        };
+        let provider: Arc<dyn LlmProvider> = Arc::new(ProviderHandleAdapter::new_with_support(
             provider_handle,
             provider_name.clone(),
+            tool_calling,
         ));
 
         // Check tool calling support for non-trivial research
         if !classified.skip_search && !provider.supports_tool_calling() {
             let _ = tx.send(AgentEvent::Error(
-                "Deep Research requires a model with tool calling support. Please select an OpenAI or NVIDIA model (e.g., gpt-4o, nvidia/meta/llama-3.1-70b-instruct). You can use /model to change models.".into()
+                "Deep Research requires a model with tool calling support. Please select a compatible model (e.g., gpt-4o, claude-3-5-sonnet-latest, gemini-2.0-flash). You can use /model to change models.".into()
             ));
             return;
         }
@@ -251,7 +266,7 @@ mod tests {
             let handle = Arc::new(RwLock::new(
                 Box::new(mock) as Box<dyn LlmProvider + Send + Sync>
             ));
-            let adapter = ProviderHandleAdapter::new_with_name(handle, "openai".to_string());
+            let adapter = ProviderHandleAdapter::new_with_support(handle, "openai".to_string(), true);
             assert!(
                 adapter.supports_tool_calling(),
                 "openai provider should support tool calling"
@@ -261,17 +276,17 @@ mod tests {
             let handle2 = Arc::new(RwLock::new(
                 Box::new(mock2) as Box<dyn LlmProvider + Send + Sync>
             ));
-            let adapter2 = ProviderHandleAdapter::new_with_name(handle2, "ollama".to_string());
+            let adapter2 = ProviderHandleAdapter::new_with_support(handle2, "ollama".to_string(), false);
             assert!(
                 !adapter2.supports_tool_calling(),
-                "non-openai provider should not support tool calling"
+                "non-tool-calling provider should not support tool calling"
             );
 
             let mock3 = MockLlmProvider::new(vec![]);
             let handle3 = Arc::new(RwLock::new(
                 Box::new(mock3) as Box<dyn LlmProvider + Send + Sync>
             ));
-            let adapter3 = ProviderHandleAdapter::new_with_name(handle3, "nvidia".to_string());
+            let adapter3 = ProviderHandleAdapter::new_with_support(handle3, "nvidia".to_string(), true);
             assert!(
                 adapter3.supports_tool_calling(),
                 "nvidia provider should support tool calling"

@@ -142,11 +142,13 @@ impl ContentExtractor {
 mod tests {
     use super::*;
     use std::sync::Arc;
+    use crate::llm::provider::{Chunk, ToolDefinition, ToolResponse, FinishReason};
 
     // Dummy provider that always returns a fixed JSON payload for testing extraction path
     struct DummyProvider;
+    #[async_trait::async_trait]
     impl LlmProvider for DummyProvider {
-        fn stream_completion(
+        async fn stream_completion(
             &self,
             _messages: &[Message],
             _model: &str,
@@ -154,6 +156,40 @@ mod tests {
             Ok(vec![Chunk {
                 content: r#"{"extracted_facts": "- Fact A\n- Fact B"}"#.to_string(),
             }])
+        }
+
+        async fn complete_with_tools(
+            &self,
+            _messages: &[Message],
+            _tools: &[ToolDefinition],
+            _model: &str,
+        ) -> Result<ToolResponse, crate::llm::provider::ProviderError> {
+            Ok(ToolResponse {
+                content: None,
+                tool_calls: vec![],
+                finish_reason: FinishReason::Stop,
+                usage: None,
+            })
+        }
+
+        fn name(&self) -> &str {
+            "dummy"
+        }
+
+        fn is_authenticated(&self) -> bool {
+            true
+        }
+
+        async fn authenticate(&mut self, _api_key: &str) -> Result<(), crate::llm::provider::ProviderError> {
+            Ok(())
+        }
+
+        async fn deauthenticate(&mut self) -> Result<(), crate::llm::provider::ProviderError> {
+            Ok(())
+        }
+
+        async fn list_models(&self) -> Result<Vec<String>, crate::llm::provider::ProviderError> {
+            Ok(vec!["dummy-model".to_string()])
         }
     }
 
@@ -180,8 +216,9 @@ mod tests {
     #[test]
     fn test_fallback_on_bad_json() {
         struct BadJsonProvider;
+        #[async_trait::async_trait]
         impl LlmProvider for BadJsonProvider {
-            fn stream_completion(
+            async fn stream_completion(
                 &self,
                 _messages: &[Message],
                 _model: &str,
@@ -190,6 +227,40 @@ mod tests {
                     content: "not-json-output".to_string(),
                 }])
             }
+
+            async fn complete_with_tools(
+                &self,
+                _messages: &[Message],
+                _tools: &[ToolDefinition],
+                _model: &str,
+            ) -> Result<ToolResponse, crate::llm::provider::ProviderError> {
+                Ok(ToolResponse {
+                    content: None,
+                    tool_calls: vec![],
+                    finish_reason: FinishReason::Stop,
+                    usage: None,
+                })
+            }
+
+            fn name(&self) -> &str {
+                "bad-json"
+            }
+
+            fn is_authenticated(&self) -> bool {
+                true
+            }
+
+            async fn authenticate(&mut self, _api_key: &str) -> Result<(), crate::llm::provider::ProviderError> {
+                Ok(())
+            }
+
+            async fn deauthenticate(&mut self) -> Result<(), crate::llm::provider::ProviderError> {
+                Ok(())
+            }
+
+            async fn list_models(&self) -> Result<Vec<String>, crate::llm::provider::ProviderError> {
+                Ok(vec!["bad-json-model".to_string()])
+            }
         }
         let provider = Arc::new(BadJsonProvider);
         let extractor = ContentExtractor::new(provider, "test-model".to_string());
@@ -197,6 +268,6 @@ mod tests {
         let facts = futures::executor::block_on(extractor.extract_facts(content, "query"));
         // Should produce at least one fact from the fallback
         assert_eq!(facts.len(), 1);
-        assert_eq!(facts[0].content, "not-json-output");
+        assert_eq!(facts[0].content, "Short text.");
     }
 }

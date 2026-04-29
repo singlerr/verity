@@ -125,9 +125,19 @@ pub trait LlmProvider: Send + Sync {
 /// A thread-safe handle to a provider instance using trait objects
 pub type ProviderHandle = Arc<RwLock<Box<dyn LlmProvider + Send + Sync>>>;
 
+/// Static metadata for a registered LLM provider.
+/// Declared at registration time — no locking needed to read.
+pub struct ProviderMetadata {
+    pub display_name: String,        // Human-readable: "OpenAI", "Anthropic", "Google Gemini", "Ollama (local)", "NVIDIA NIM"
+    pub requires_api_key: bool,      // false for Ollama
+    pub model_prefixes: Vec<String>, // Model ID prefixes: ["gpt-"], ["claude-"], ["gemini-"], ["nvidia/"], []
+    pub fallback_models: Vec<String>,// Default models when API unavailable
+}
+
 /// Registry of available providers exposed via trait objects
 pub struct ProviderRegistry {
     providers: HashMap<String, ProviderHandle>,
+    metadata: HashMap<String, ProviderMetadata>,
 }
 
 impl Default for ProviderRegistry {
@@ -140,38 +150,42 @@ impl ProviderRegistry {
     pub fn new() -> Self {
         Self {
             providers: HashMap::new(),
+            metadata: HashMap::new(),
         }
     }
 
-    // Register a concrete provider behind a trait object
-    pub fn register(&mut self, name: String, provider: Box<dyn LlmProvider + Send + Sync>) {
-        self.providers.insert(name, Arc::new(RwLock::new(provider)));
+    pub fn register(&mut self, name: String, provider: Box<dyn LlmProvider + Send + Sync>, meta: ProviderMetadata) {
+        self.providers.insert(name.clone(), Arc::new(RwLock::new(provider)));
+        self.metadata.insert(name, meta);
     }
 
     pub fn get(&self, name: &str) -> Option<ProviderHandle> {
         self.providers.get(name).cloned()
     }
 
-    // Resolve a provider based on a model prefix routing rule
-    pub fn resolve(&self, model: &str) -> Option<ProviderHandle> {
-        let key = if model.starts_with("gpt-") {
-            "openai"
-        } else if model.starts_with("claude-") {
-            "anthropic"
-        } else if model.starts_with("gemini-") {
-            "google"
-        } else if model.starts_with("nvidia/") {
-            "nvidia"
-        } else {
-            "ollama"
-        };
-        self.providers.get(key).cloned()
+    pub fn provider_names(&self) -> Vec<String> {
+        let mut names: Vec<String> = self.metadata.keys().cloned().collect();
+        names.sort();
+        names
     }
-}
 
-/// Convenience: build an empty registry (no providers registered yet)
-pub fn build_registry() -> ProviderRegistry {
-    ProviderRegistry::new()
+    pub fn get_metadata(&self, name: &str) -> Option<&ProviderMetadata> {
+        self.metadata.get(name)
+    }
+
+    pub fn resolve(&self, model: &str) -> Option<ProviderHandle> {
+        for (name, meta) in &self.metadata {
+            if meta.model_prefixes.iter().any(|prefix| model.starts_with(prefix.as_str())) {
+                return self.providers.get(name).cloned();
+            }
+        }
+        for (name, meta) in &self.metadata {
+            if meta.model_prefixes.is_empty() {
+                return self.providers.get(name).cloned();
+            }
+        }
+        self.providers.values().next().cloned()
+    }
 }
 
 #[cfg(test)]
@@ -396,5 +410,82 @@ mod tests {
             assert_eq!(result2[0].content, "Second ");
             assert_eq!(result2[1].content, "response");
         });
+    }
+
+    #[test]
+    fn provider_metadata_fields() {
+        let pr = crate::llm::build_registry();
+
+        // Check all 5 providers are registered
+        let names = pr.provider_names();
+        assert!(names.contains(&"openai".to_string()), "openai missing");
+        assert!(names.contains(&"anthropic".to_string()), "anthropic missing");
+        assert!(names.contains(&"google".to_string()), "google missing");
+        assert!(names.contains(&"ollama".to_string()), "ollama missing");
+        assert!(names.contains(&"nvidia".to_string()), "nvidia missing");
+        assert_eq!(names.len(), 5, "expected exactly 5 providers");
+
+        // Check OpenAI metadata
+        let openai = pr.get_metadata("openai").expect("openai metadata");
+        assert_eq!(openai.display_name, "OpenAI");
+        assert!(openai.requires_api_key);
+        assert!(openai.model_prefixes.contains(&"gpt-".to_string()));
+        assert!(!openai.fallback_models.is_empty());
+
+        // Check Anthropic metadata
+        let anthropic = pr.get_metadata("anthropic").expect("anthropic metadata");
+        assert_eq!(anthropic.display_name, "Anthropic");
+        assert!(anthropic.requires_api_key);
+        assert!(anthropic.model_prefixes.contains(&"claude-".to_string()));
+
+        // Check Google metadata
+        let google = pr.get_metadata("google").expect("google metadata");
+        assert_eq!(google.display_name, "Google Gemini");
+        assert!(google.requires_api_key);
+        assert!(google.model_prefixes.iter().any(|p| p.starts_with("gemini")));
+
+        // Check Ollama metadata
+        let ollama = pr.get_metadata("ollama").expect("ollama metadata");
+        assert_eq!(ollama.display_name, "Ollama (local)");
+        assert!(!ollama.requires_api_key);
+
+        // Check NVIDIA metadata
+        let nvidia = pr.get_metadata("nvidia").expect("nvidia metadata");
+        assert_eq!(nvidia.display_name, "NVIDIA NIM");
+        assert!(nvidia.requires_api_key);
+        assert!(nvidia.model_prefixes.contains(&"nvidia/".to_string()));
+    }
+
+    #[test]
+    fn resolve_routes_by_prefix() {
+        let pr = crate::llm::build_registry();
+
+        // OpenAI models
+        assert!(pr.resolve("gpt-4o").is_some());
+        assert!(pr.resolve("gpt-3.5-turbo").is_some());
+
+        // Anthropic models
+        assert!(pr.resolve("claude-3-opus-latest").is_some());
+        assert!(pr.resolve("claude-sonnet-4-5").is_some());
+
+        // Google models
+        assert!(pr.resolve("gemini-1.5-pro").is_some());
+        assert!(pr.resolve("gemini-2.0-flash").is_some());
+
+        // NVIDIA models
+        assert!(pr.resolve("nvidia/llama-3.1").is_some());
+
+        // Unknown models should fall back to Ollama (or first provider)
+        assert!(pr.resolve("llama-3.1").is_some());
+        assert!(pr.resolve("mistral-7b").is_some());
+    }
+
+    #[test]
+    fn provider_names_returns_sorted() {
+        let pr = crate::llm::build_registry();
+        let names = pr.provider_names();
+        let mut sorted = names.clone();
+        sorted.sort();
+        assert_eq!(names, sorted, "provider_names should return sorted names");
     }
 }

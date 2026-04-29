@@ -32,6 +32,7 @@ pub struct App {
     pub active_model: String,
     pub answer_scroll: u16,
     pub research_depth: ResearchDepth,
+    pub provider_display_names: std::collections::HashMap<String, String>,
 }
 
 impl App {
@@ -59,6 +60,7 @@ impl App {
             active_model: config.active_model,
             answer_scroll: 0,
             research_depth: ResearchDepth::default(),
+            provider_display_names: std::collections::HashMap::new(),
         }
     }
 

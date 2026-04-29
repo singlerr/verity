@@ -34,6 +34,7 @@ pub async fn run_event_loop(
                     frame.area(),
                     &app.model_list,
                     app.selected_model_idx,
+                    &app.provider_display_names,
                 );
             }
         })?;
@@ -65,7 +66,13 @@ fn open_model_select(app: &mut App, agent_tx: &std::sync::mpsc::Sender<AgentEven
     app.selected_model_idx = 0;
     let pr = Arc::new(crate::llm::build_registry());
     let tx = agent_tx.clone();
-    tokio::spawn(crate::cli::fetch_model_list(pr, tx));
+    tokio::spawn(crate::cli::fetch_model_list(pr.clone(), tx));
+    let display_names: std::collections::HashMap<String, String> = pr.provider_names().into_iter()
+        .filter_map(|name| {
+            pr.get_metadata(&name).map(|meta| (name, meta.display_name.clone()))
+        })
+        .collect();
+    app.provider_display_names = display_names;
 }
 
 fn set_model(app: &mut App, model: String) {

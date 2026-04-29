@@ -12,18 +12,15 @@ use super::layout::ColorScheme;
 use crate::llm::provider::ModelEntry;
 
 /// Group models by provider, preserving insertion order.
-/// Group models by provider, preserving insertion order.
-fn group_by_provider<'a>(models: &'a [ModelEntry]) -> Vec<(&'static str, Vec<&'a ModelEntry>)> {
-    let mut groups: Vec<(&'static str, Vec<&'a ModelEntry>)> = Vec::new();
+fn group_by_provider<'a>(
+    models: &'a [ModelEntry],
+    display_names: &std::collections::HashMap<String, String>,
+) -> Vec<(String, Vec<&'a ModelEntry>)> {
+    let mut groups: Vec<(String, Vec<&'a ModelEntry>)> = Vec::new();
     for entry in models {
-        let prov: &'static str = match entry.provider.as_str() {
-            "openai" => "OpenAI",
-            "anthropic" => "Anthropic",
-            "google" => "Google",
-            "nvidia" => "NVIDIA",
-            "ollama" => "Ollama",
-            _ => "Unknown",
-        };
+        let prov = display_names.get(&entry.provider)
+            .cloned()
+            .unwrap_or_else(|| entry.provider.clone());
         if let Some(g) = groups.iter_mut().find(|(p, _)| *p == prov) {
             g.1.push(entry);
         } else {
@@ -34,7 +31,7 @@ fn group_by_provider<'a>(models: &'a [ModelEntry]) -> Vec<(&'static str, Vec<&'a
 }
 
 /// Returns the visual row (0-based, within inner area) of the selected flat index.
-fn selected_visual_row(groups: &[(&str, Vec<&ModelEntry>)], selected: usize) -> usize {
+fn selected_visual_row(groups: &[(String, Vec<&ModelEntry>)], selected: usize) -> usize {
     let mut flat_idx = 0usize;
     let mut visual = 0usize;
     for (g_idx, (_, ms)) in groups.iter().enumerate() {
@@ -59,6 +56,7 @@ pub fn render_model_select_popup(
     area: Rect,
     models: &[ModelEntry],
     selected: usize,
+    display_names: &std::collections::HashMap<String, String>,
 ) {
     let colors = ColorScheme::default();
 
@@ -85,7 +83,7 @@ pub fn render_model_select_popup(
         return;
     }
 
-    let groups = group_by_provider(models);
+    let groups = group_by_provider(models, display_names);
 
     // Total visual rows: per group = 1 header + models; blank line between groups
     let content_rows: u16 = groups

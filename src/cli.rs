@@ -80,56 +80,39 @@ pub fn restore_terminal() {
     stdout().execute(Show).ok();
 }
 
-pub fn fallback_models(provider: &str) -> Vec<String> {
-    match provider {
-        "openai" => vec![
-            "gpt-4o".into(),
-            "gpt-4o-mini".into(),
-            "gpt-4-turbo".into(),
-            "gpt-3.5-turbo".into(),
-        ],
-        "anthropic" => vec![
-            "claude-opus-4-5".into(),
-            "claude-sonnet-4-5".into(),
-            "claude-haiku-4-5".into(),
-            "claude-3-5-sonnet-latest".into(),
-            "claude-3-5-haiku-latest".into(),
-            "claude-3-opus-latest".into(),
-        ],
-        "google" => vec![
-            "gemini-2.0-flash".into(),
-            "gemini-1.5-pro".into(),
-            "gemini-1.5-flash".into(),
-        ],
-        "nvidia" => vec![],
-        _ => vec![],
-    }
-}
-
 /// Fetch model list from provider registry and emit to the given channel.
-/// Only includes models from providers that support tool calling.
 pub async fn fetch_model_list(pr: Arc<ProviderRegistry>, tx: std::sync::mpsc::Sender<AgentEvent>) {
     let cred_store = CredentialStore::load().unwrap_or_default();
     let mut all_entries: Vec<ModelEntry> = Vec::new();
-    for provider_name in &["openai", "nvidia"] {
-        if let Some(handle) = pr.get(provider_name) {
-            if let Some(creds) = cred_store.get(provider_name) {
+
+    for provider_name in pr.provider_names() {
+        let meta = match pr.get_metadata(&provider_name) {
+            Some(m) => m,
+            None => continue,
+        };
+
+        if let Some(handle) = pr.get(&provider_name) {
+            if meta.requires_api_key {
+                if let Some(creds) = cred_store.get(&provider_name) {
+                    let mut w = handle.write().await;
+                    let _ = w.authenticate(&creds.api_key).await;
+                }
+            } else {
+                // Providers like Ollama don't need API keys — just connectivity check
                 let mut w = handle.write().await;
-                let _ = w.authenticate(&creds.api_key).await;
+                let _ = w.authenticate("").await;
             }
+
             let lock = handle.read().await;
-            if !lock.supports_tool_calling() {
-                continue;
-            }
             let models = match timeout(Duration::from_secs(5), lock.list_models()).await {
                 Ok(Ok(list)) => list,
-                _ => fallback_models(provider_name),
+                _ => meta.fallback_models.clone(),
             };
             let entries: Vec<ModelEntry> = models
                 .into_iter()
                 .map(|name| ModelEntry {
                     name,
-                    provider: provider_name.to_string(),
+                    provider: provider_name.clone(),
                 })
                 .collect();
             all_entries.extend(entries);
@@ -143,13 +126,17 @@ pub async fn handle_command(cmd: Commands) -> Result<()> {
         Commands::Auth { list } => {
             if list {
                 let store = CredentialStore::load().unwrap_or_default();
-                for provider in ["openai", "anthropic", "gemini", "ollama"] {
-                    let status = match store.status(provider) {
+                let pr = crate::llm::build_registry();
+                for provider_name in pr.provider_names() {
+                    let display_name = pr.get_metadata(&provider_name)
+                        .map(|m| m.display_name.as_str())
+                        .unwrap_or(&provider_name);
+                    let status = match store.status(&provider_name) {
                         AuthStatus::Authenticated => "authenticated",
                         AuthStatus::NotAuthenticated => "not authenticated",
                         AuthStatus::Expired => "expired",
                     };
-                    println!("{}: {}", provider, status);
+                    println!("{}: {}", display_name, status);
                 }
             } else {
                 // Run interactive auth screen

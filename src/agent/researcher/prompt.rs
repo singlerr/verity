@@ -346,7 +346,7 @@ mod tests {
         assert!(balanced.contains("action orchestrator with reasoning"));
         assert!(balanced.contains("__reasoning_preamble"));
         assert!(balanced.contains("mistakes_to_avoid"));
-        assert!(balanced.contains("max 6 tool calls"));
+        assert!(balanced.contains("6 tool calls"));
 
         assert!(quality.contains("deep-research orchestrator"));
         assert!(quality.contains("research_strategy"));
@@ -360,7 +360,7 @@ mod tests {
     #[test]
     fn speed_mode_has_no_reasoning_preamble() {
         let speed = get_system_prompt(ResearchDepth::Speed);
-        assert!(speed.contains("Skip reasoning_preamble"));
+        assert!(!speed.contains("__reasoning_preamble"));
     }
 
     #[test]

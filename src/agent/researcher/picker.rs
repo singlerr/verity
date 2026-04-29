@@ -132,7 +132,7 @@ mod tests {
         name: String,
     }
 
-    #[async_trait]
+    #[async_trait::async_trait]
     impl LlmProvider for MockProvider {
         async fn stream_completion(
             &self,

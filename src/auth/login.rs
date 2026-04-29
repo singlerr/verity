@@ -24,8 +24,13 @@ enum InputState {
     EnteringKey { provider: String },
 }
 
+struct ProviderInfo {
+    display_name: String,
+    key: String,
+}
+
 pub struct AuthLoginScreen {
-    providers: Vec<&'static str>,
+    providers: Vec<ProviderInfo>,
     selection: usize,
     state: InputState,
     key_input: String,
@@ -36,14 +41,17 @@ pub struct AuthLoginScreen {
 impl AuthLoginScreen {
     pub fn new() -> Result<Self> {
         let store = CredentialStore::load()?;
+        let pr = crate::llm::build_registry();
+        let providers: Vec<ProviderInfo> = pr.provider_names().into_iter()
+            .filter_map(|name| {
+                pr.get_metadata(&name).map(|meta| ProviderInfo {
+                    display_name: meta.display_name.clone(),
+                    key: name,
+                })
+            })
+            .collect();
         Ok(Self {
-            providers: vec![
-                "OpenAI",
-                "Anthropic",
-                "Google Gemini",
-                "Ollama (local)",
-                "NVIDIA NIM",
-            ],
+            providers,
             selection: 0,
             state: InputState::SelectingProvider,
             key_input: String::new(),
@@ -88,7 +96,7 @@ impl AuthLoginScreen {
             };
             lines.push(Line::from(vec![
                 Span::styled(if sel { "❯ " } else { "  " }, style),
-                Span::styled(*provider, style),
+                Span::styled(provider.display_name.clone(), style),
             ]));
         }
         if !self.status.is_empty() {
@@ -175,17 +183,9 @@ impl AuthLoginScreen {
                 AuthAction::Continue
             }
             KeyCode::Enter => {
-                let p = self.providers[self.selection];
-                let key = match p {
-                    "OpenAI" => "openai",
-                    "Anthropic" => "anthropic",
-                    "Google Gemini" => "gemini",
-                    "Ollama (local)" => "ollama",
-                    "NVIDIA NIM" => "nvidia",
-                    _ => &p.to_lowercase(),
-                };
+                let info = &self.providers[self.selection];
                 self.state = InputState::EnteringKey {
-                    provider: key.to_string(),
+                    provider: info.key.clone(),
                 };
                 self.key_input.clear();
                 self.status.clear();
@@ -260,13 +260,7 @@ impl AuthLoginScreen {
 impl Default for AuthLoginScreen {
     fn default() -> Self {
         Self::new().unwrap_or_else(|_| Self {
-            providers: vec![
-                "OpenAI",
-                "Anthropic",
-                "Google Gemini",
-                "Ollama (local)",
-                "NVIDIA NIM",
-            ],
+            providers: Vec::new(),
             selection: 0,
             state: InputState::SelectingProvider,
             key_input: String::new(),
