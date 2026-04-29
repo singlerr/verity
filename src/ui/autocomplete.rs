@@ -13,9 +13,9 @@ use super::layout::ColorScheme;
 /// Known slash commands: (full command text, short description).
 pub const COMMANDS: &[(&str, &str)] = &[
     ("/mode research", "research mode"),
-    ("/mode code",     "code mode"),
-    ("/model ",        "set model  e.g. gpt-4o"),
-    ("/help",          "show keybindings"),
+    ("/mode code", "code mode"),
+    ("/model ", "set model  e.g. gpt-4o"),
+    ("/help", "show keybindings"),
 ];
 
 /// Returns indices into COMMANDS whose text starts with `query`.
@@ -85,11 +85,17 @@ pub fn render_popup(frame: &mut Frame, command_area: Rect, query: &str, selected
 
         let marker_style = Style::default().fg(colors.accent);
         let cmd_style = if is_sel {
-            Style::default().fg(colors.accent).add_modifier(Modifier::BOLD)
+            Style::default()
+                .fg(colors.accent)
+                .add_modifier(Modifier::BOLD)
         } else {
             Style::default().fg(colors.ink)
         };
-        let bg = if is_sel { colors.status_bg } else { colors.header_bg };
+        let bg = if is_sel {
+            colors.status_bg
+        } else {
+            colors.header_bg
+        };
 
         let line = Line::from(vec![
             Span::styled(if is_sel { "▶ " } else { "  " }, marker_style),

@@ -1,10 +1,10 @@
-use std::sync::Arc;
 use std::collections::HashSet;
+use std::sync::Arc;
 
 use serde::Deserialize;
 
-use crate::llm::provider::{LlmProvider, Message, Role};
 use crate::agent::researcher::ExtractedFact;
+use crate::llm::provider::{LlmProvider, Message, Role};
 
 // Public extractor interface for use by Task 6 and beyond
 // NOTE: We reuse the ExtractedFact type defined in the researcher crate
@@ -41,8 +41,14 @@ impl ContentExtractor {
             // Build a minimal prompt for the LLM. We pass a stable system prompt and the chunk+query in user content.
             let prompt_for_user = format!("Query: {}\nContent: {}", query, chunk);
             let messages = vec![
-                Message { role: Role::System, content: EXTRACTOR_PROMPT.to_string() },
-                Message { role: Role::User, content: prompt_for_user },
+                Message {
+                    role: Role::System,
+                    content: EXTRACTOR_PROMPT.to_string(),
+                },
+                Message {
+                    role: Role::User,
+                    content: prompt_for_user,
+                },
             ];
 
             match self.llm.stream_completion(&messages, &self.model).await {
@@ -74,7 +80,11 @@ impl ContentExtractor {
                         Err(_) => {
                             // Fallback: use the raw chunk text as a single fact (truncate later if needed)
                             let raw = chunk.clone();
-                            let truncated = if raw.len() > 3000 { raw[..3000].to_string() } else { raw };
+                            let truncated = if raw.len() > 3000 {
+                                raw[..3000].to_string()
+                            } else {
+                                raw
+                            };
                             facts.push(ExtractedFact {
                                 content: truncated,
                                 source_url: String::new(),
@@ -85,7 +95,11 @@ impl ContentExtractor {
                 }
                 Err(_e) => {
                     // LLM call failed gracefully; fallback to truncated chunk
-                    let truncated = if chunk.len() > 3000 { chunk[..3000].to_string() } else { chunk.clone() };
+                    let truncated = if chunk.len() > 3000 {
+                        chunk[..3000].to_string()
+                    } else {
+                        chunk.clone()
+                    };
                     facts.push(ExtractedFact {
                         content: truncated,
                         source_url: String::new(),
@@ -111,7 +125,9 @@ impl ContentExtractor {
             let end = std::cmp::min(start + chunk_size, chars.len());
             let chunk: String = chars[start..end].iter().collect();
             chunks.push(chunk);
-            if end == chars.len() { break; }
+            if end == chars.len() {
+                break;
+            }
             if end > overlap {
                 start = end - overlap;
             } else {
@@ -130,8 +146,14 @@ mod tests {
     // Dummy provider that always returns a fixed JSON payload for testing extraction path
     struct DummyProvider;
     impl LlmProvider for DummyProvider {
-        fn stream_completion(&self, _messages: &[Message], _model: &str) -> Result<Vec<Chunk>, crate::llm::provider::ProviderError> {
-            Ok(vec![Chunk { content: r#"{"extracted_facts": "- Fact A\n- Fact B"}"#.to_string() }])
+        fn stream_completion(
+            &self,
+            _messages: &[Message],
+            _model: &str,
+        ) -> Result<Vec<Chunk>, crate::llm::provider::ProviderError> {
+            Ok(vec![Chunk {
+                content: r#"{"extracted_facts": "- Fact A\n- Fact B"}"#.to_string(),
+            }])
         }
     }
 
@@ -159,8 +181,14 @@ mod tests {
     fn test_fallback_on_bad_json() {
         struct BadJsonProvider;
         impl LlmProvider for BadJsonProvider {
-            fn stream_completion(&self, _messages: &[Message], _model: &str) -> Result<Vec<Chunk>, crate::llm::provider::ProviderError> {
-                Ok(vec![Chunk { content: "not-json-output".to_string() }])
+            fn stream_completion(
+                &self,
+                _messages: &[Message],
+                _model: &str,
+            ) -> Result<Vec<Chunk>, crate::llm::provider::ProviderError> {
+                Ok(vec![Chunk {
+                    content: "not-json-output".to_string(),
+                }])
             }
         }
         let provider = Arc::new(BadJsonProvider);

@@ -1,4 +1,6 @@
-use crate::llm::provider::{Chunk, LlmProvider, Message, ProviderError, Role, ToolDefinition, ToolResponse};
+use crate::llm::provider::{
+    Chunk, LlmProvider, Message, ProviderError, Role, ToolDefinition, ToolResponse,
+};
 use async_trait::async_trait;
 use futures::StreamExt;
 use serde::{Deserialize, Serialize};
@@ -99,9 +101,7 @@ impl LlmProvider for OllamaProvider {
 
         if !response.status().is_success() {
             let msg = format!("Ollama returned error: {}", response.status());
-            return Err(Box::new(std::io::Error::other(
-                msg,
-            )));
+            return Err(Box::new(std::io::Error::other(msg)));
         }
 
         let mut chunks = Vec::new();
@@ -158,19 +158,40 @@ impl LlmProvider for OllamaProvider {
 
     async fn list_models(&self) -> Result<Vec<String>, ProviderError> {
         let url = format!("{}/api/tags", self.base_url);
-        let response = self.client.get(&url).send().await.map_err(Self::map_error)?;
+        let response = self
+            .client
+            .get(&url)
+            .send()
+            .await
+            .map_err(Self::map_error)?;
         if !response.status().is_success() {
-            return Err(Box::new(std::io::Error::other("Failed to connect to Ollama")));
+            return Err(Box::new(std::io::Error::other(
+                "Failed to connect to Ollama",
+            )));
         }
         #[derive(Deserialize)]
-        struct ModelTag { name: String }
+        struct ModelTag {
+            name: String,
+        }
         #[derive(Deserialize)]
-        struct TagsResponse { models: Vec<ModelTag> }
-        let body: TagsResponse = response.json().await.map_err(|e| format!("Parse error: {}", e))?;
+        struct TagsResponse {
+            models: Vec<ModelTag>,
+        }
+        let body: TagsResponse = response
+            .json()
+            .await
+            .map_err(|e| format!("Parse error: {}", e))?;
         Ok(body.models.into_iter().map(|m| m.name).collect())
     }
 
-    async fn complete_with_tools(&self, _messages: &[Message], _tools: &[ToolDefinition], _model: &str) -> Result<ToolResponse, ProviderError> { Err("Tool calling not supported by this provider".into()) }
+    async fn complete_with_tools(
+        &self,
+        _messages: &[Message],
+        _tools: &[ToolDefinition],
+        _model: &str,
+    ) -> Result<ToolResponse, ProviderError> {
+        Err("Tool calling not supported by this provider".into())
+    }
 }
 impl Default for OllamaProvider {
     fn default() -> Self {

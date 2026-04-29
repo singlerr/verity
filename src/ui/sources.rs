@@ -31,7 +31,12 @@ pub fn render_sources(frame: &mut Frame, area: Rect, app: &App) {
         ]));
     } else {
         for (idx, source) in app.sources.iter().enumerate() {
-            lines.push(build_source_line(source, idx, app.selected_source == Some(idx), &colors));
+            lines.push(build_source_line(
+                source,
+                idx,
+                app.selected_source == Some(idx),
+                &colors,
+            ));
         }
     }
 
@@ -41,7 +46,12 @@ pub fn render_sources(frame: &mut Frame, area: Rect, app: &App) {
     );
 }
 
-fn build_source_line<'a>(source: &'a Source, idx: usize, is_selected: bool, colors: &'a ColorScheme) -> Line<'a> {
+fn build_source_line<'a>(
+    source: &'a Source,
+    idx: usize,
+    is_selected: bool,
+    colors: &'a ColorScheme,
+) -> Line<'a> {
     let (indicator, row_style) = if is_selected {
         (
             Span::styled("\u{276f} ", Style::default().fg(colors.accent)), // ❯
@@ -65,7 +75,13 @@ fn build_source_line<'a>(source: &'a Source, idx: usize, is_selected: bool, colo
     );
 
     // Favicon badge — first char of domain
-    let domain_char = source.domain.chars().next().unwrap_or('?').to_uppercase().to_string();
+    let domain_char = source
+        .domain
+        .chars()
+        .next()
+        .unwrap_or('?')
+        .to_uppercase()
+        .to_string();
     let badge_bg = cycle_color(idx, colors);
     let favicon = Span::styled(
         format!(" {} ", domain_char),
@@ -95,7 +111,11 @@ fn truncate(s: &str, max_width: usize) -> String {
     if chars.len() <= max_width {
         s.to_string()
     } else {
-        chars.into_iter().take(max_width.saturating_sub(1)).collect::<String>() + "\u{2026}"
+        chars
+            .into_iter()
+            .take(max_width.saturating_sub(1))
+            .collect::<String>()
+            + "\u{2026}"
     }
 }
 

@@ -1,7 +1,7 @@
 //! Researcher prompts — mode-specific system prompts and tool definitions.
 
-use crate::llm::provider::ToolDefinition;
 use super::{ResearchDepth, ResearcherMessage};
+use crate::llm::provider::ToolDefinition;
 
 /// Build the system prompt for the researcher loop based on depth mode.
 pub fn get_system_prompt(depth: ResearchDepth) -> String {
@@ -234,7 +234,9 @@ pub fn get_user_prompt(query: &str, iteration: usize, max_iterations: usize) -> 
 
 fn get_today_date() -> String {
     let now = std::time::SystemTime::now();
-    let secs = now.duration_since(std::time::UNIX_EPOCH).unwrap_or_default();
+    let secs = now
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default();
     let days = secs.as_secs() / 86400;
     let years = 1970 + (days / 365) as i64;
     let remaining_days = days % 365;
@@ -422,6 +424,8 @@ mod tests {
         let tools = get_tool_definitions();
         let done = tools.iter().find(|t| t.name == "done").unwrap();
         assert!(done.description.contains("__reasoning_preamble"));
-        assert!(done.description.contains("after any other needed tool calls"));
+        assert!(done
+            .description
+            .contains("after any other needed tool calls"));
     }
 }

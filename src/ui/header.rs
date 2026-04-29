@@ -15,8 +15,16 @@ pub fn render_header(frame: &mut Frame, area: Rect, _app: &crate::app::App) {
     // Left side spans
     let left_spans: Vec<Span> = vec![
         Span::raw(" "),
-        Span::styled("\u{276f} ", Style::default().fg(colors.accent).add_modifier(Modifier::BOLD)), // ❯
-        Span::styled("verity", Style::default().fg(colors.ink).add_modifier(Modifier::BOLD)),
+        Span::styled(
+            "\u{276f} ",
+            Style::default()
+                .fg(colors.accent)
+                .add_modifier(Modifier::BOLD),
+        ), // ❯
+        Span::styled(
+            "verity",
+            Style::default().fg(colors.ink).add_modifier(Modifier::BOLD),
+        ),
         Span::styled(" v0.1.0", Style::default().fg(colors.dim)),
         Span::styled(" \u{b7} workspace: ", Style::default().fg(colors.dim)), // ·
         Span::styled("default", Style::default().fg(colors.ink)),
@@ -44,8 +52,7 @@ pub fn render_header(frame: &mut Frame, area: Rect, _app: &crate::app::App) {
     all_spans.extend(right_spans);
 
     frame.render_widget(
-        Paragraph::new(Line::from(all_spans))
-            .style(Style::default().bg(colors.header_bg)),
+        Paragraph::new(Line::from(all_spans)).style(Style::default().bg(colors.header_bg)),
         area,
     );
 }

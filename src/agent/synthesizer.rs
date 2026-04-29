@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
+use crate::agent::researcher::{ExtractedFact, ResearchDepth};
 use crate::app::Source;
-use crate::agent::researcher::{ResearchDepth, ExtractedFact};
 use crate::llm::provider::{LlmProvider, Message, Role};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -24,7 +24,10 @@ pub struct ResearchSynthesizer {
 
 impl ResearchSynthesizer {
     pub fn new(provider: Arc<dyn LlmProvider>, model: impl Into<String>) -> Self {
-        Self { provider, model: model.into() }
+        Self {
+            provider,
+            model: model.into(),
+        }
     }
 
     pub async fn synthesize(
@@ -35,10 +38,19 @@ impl ResearchSynthesizer {
         extracted_facts: &[ExtractedFact],
     ) -> Result<SynthesisOutput, String> {
         let messages = vec![
-            Message { role: Role::System, content: Self::system_prompt(depth) },
-            Message { role: Role::User, content: Self::build_context(query, sources, extracted_facts) },
+            Message {
+                role: Role::System,
+                content: Self::system_prompt(depth),
+            },
+            Message {
+                role: Role::User,
+                content: Self::build_context(query, sources, extracted_facts),
+            },
         ];
-        let chunks = self.provider.stream_completion(&messages, &self.model).await
+        let chunks = self
+            .provider
+            .stream_completion(&messages, &self.model)
+            .await
             .map_err(|e| format!("stream_completion failed: {}", e))?;
         let text: String = chunks.into_iter().map(|c| c.content).collect();
         let citations = Self::extract_citations(&text, sources);
@@ -87,7 +99,10 @@ impl ResearchSynthesizer {
     }
 
     fn escape_xml(s: &str) -> String {
-        s.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;").replace('"', "&quot;")
+        s.replace('&', "&amp;")
+            .replace('<', "&lt;")
+            .replace('>', "&gt;")
+            .replace('"', "&quot;")
     }
 
     fn extract_citations(text: &str, sources: &[Source]) -> Vec<Citation> {
@@ -102,7 +117,11 @@ impl ResearchSynthesizer {
                     j += 1;
                 }
                 if j > i + 1 && j < chars.len() && chars[j] == ']' {
-                    let num: usize = chars[i + 1..j].iter().collect::<String>().parse().unwrap_or(0);
+                    let num: usize = chars[i + 1..j]
+                        .iter()
+                        .collect::<String>()
+                        .parse()
+                        .unwrap_or(0);
                     if num > 0 {
                         if let Some(source) = sources.get(num - 1) {
                             if seen.insert(num) {

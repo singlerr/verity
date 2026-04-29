@@ -9,33 +9,43 @@ use ratatui::{
 };
 
 use super::layout::ColorScheme;
+use crate::llm::provider::ModelEntry;
 
 /// Group models by provider, preserving insertion order.
-fn group_by_provider<'a>(models: &'a [String]) -> Vec<(&'static str, Vec<&'a str>)> {
-    let mut groups: Vec<(&'static str, Vec<&'a str>)> = Vec::new();
-    for model in models {
-        let prov = if model.starts_with("claude-") { "Anthropic" }
-            else if model.starts_with("gpt-") { "OpenAI" }
-            else if model.starts_with("gemini-") { "Google" }
-            else { "Ollama" };
+/// Group models by provider, preserving insertion order.
+fn group_by_provider<'a>(models: &'a [ModelEntry]) -> Vec<(&'static str, Vec<&'a ModelEntry>)> {
+    let mut groups: Vec<(&'static str, Vec<&'a ModelEntry>)> = Vec::new();
+    for entry in models {
+        let prov: &'static str = match entry.provider.as_str() {
+            "openai" => "OpenAI",
+            "anthropic" => "Anthropic",
+            "google" => "Google",
+            "nvidia" => "NVIDIA",
+            "ollama" => "Ollama",
+            _ => "Unknown",
+        };
         if let Some(g) = groups.iter_mut().find(|(p, _)| *p == prov) {
-            g.1.push(model.as_str());
+            g.1.push(entry);
         } else {
-            groups.push((prov, vec![model.as_str()]));
+            groups.push((prov, vec![entry]));
         }
     }
     groups
 }
 
 /// Returns the visual row (0-based, within inner area) of the selected flat index.
-fn selected_visual_row(groups: &[(&str, Vec<&str>)], selected: usize) -> usize {
+fn selected_visual_row(groups: &[(&str, Vec<&ModelEntry>)], selected: usize) -> usize {
     let mut flat_idx = 0usize;
     let mut visual = 0usize;
     for (g_idx, (_, ms)) in groups.iter().enumerate() {
-        if g_idx > 0 { visual += 1; } // blank line between groups
+        if g_idx > 0 {
+            visual += 1;
+        } // blank line between groups
         visual += 1; // provider header
         for _ in ms.iter() {
-            if flat_idx == selected { return visual; }
+            if flat_idx == selected {
+                return visual;
+            }
             flat_idx += 1;
             visual += 1;
         }
@@ -47,7 +57,7 @@ fn selected_visual_row(groups: &[(&str, Vec<&str>)], selected: usize) -> usize {
 pub fn render_model_select_popup(
     frame: &mut Frame,
     area: Rect,
-    models: &[String],
+    models: &[ModelEntry],
     selected: usize,
 ) {
     let colors = ColorScheme::default();
@@ -78,7 +88,9 @@ pub fn render_model_select_popup(
     let groups = group_by_provider(models);
 
     // Total visual rows: per group = 1 header + models; blank line between groups
-    let content_rows: u16 = groups.iter().enumerate()
+    let content_rows: u16 = groups
+        .iter()
+        .enumerate()
         .map(|(i, (_, ms))| {
             let blank: u16 = if i > 0 { 1 } else { 0 };
             blank + 1 + ms.len() as u16
@@ -123,15 +135,18 @@ pub fn render_model_select_popup(
         // Provider header
         let draw = visual_row - scroll as i32;
         if draw >= 0 && (draw as u16) < inner.height {
-            let hdr = Line::from(vec![
-                Span::styled(
-                    format!(" {} ", provider),
-                    Style::default().fg(colors.dim).add_modifier(Modifier::BOLD),
-                ),
-            ]);
+            let hdr = Line::from(vec![Span::styled(
+                format!(" {} ", provider),
+                Style::default().fg(colors.dim).add_modifier(Modifier::BOLD),
+            )]);
             frame.render_widget(
                 Paragraph::new(hdr).style(Style::default().bg(colors.header_bg)),
-                Rect { x: inner.x, y: inner.y + draw as u16, width: inner.width, height: 1 },
+                Rect {
+                    x: inner.x,
+                    y: inner.y + draw as u16,
+                    width: inner.width,
+                    height: 1,
+                },
             );
         }
         visual_row += 1;
@@ -142,18 +157,29 @@ pub fn render_model_select_popup(
                 let is_sel = flat_idx == selected;
                 let marker = if is_sel { "▶ " } else { "  " };
                 let style = if is_sel {
-                    Style::default().fg(colors.accent).add_modifier(Modifier::BOLD)
+                    Style::default()
+                        .fg(colors.accent)
+                        .add_modifier(Modifier::BOLD)
                 } else {
                     Style::default().fg(colors.ink)
                 };
-                let bg = if is_sel { colors.status_bg } else { colors.header_bg };
+                let bg = if is_sel {
+                    colors.status_bg
+                } else {
+                    colors.header_bg
+                };
                 let line = Line::from(vec![
                     Span::styled(marker, Style::default().fg(colors.accent)),
-                    Span::styled(*model, style),
+                    Span::styled(model.display_name(), style),
                 ]);
                 frame.render_widget(
                     Paragraph::new(line).style(Style::default().bg(bg)),
-                    Rect { x: inner.x, y: inner.y + draw as u16, width: inner.width, height: 1 },
+                    Rect {
+                        x: inner.x,
+                        y: inner.y + draw as u16,
+                        width: inner.width,
+                        height: 1,
+                    },
                 );
             }
             flat_idx += 1;

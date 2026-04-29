@@ -1,5 +1,5 @@
-use std::sync::Arc;
 use crate::llm::provider::ProviderRegistry;
+use std::sync::Arc;
 
 pub struct AgentPlanner {
     _provider_registry: Arc<ProviderRegistry>,

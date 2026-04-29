@@ -2,9 +2,11 @@
 
 use std::sync::Arc;
 
-use crate::search::{SearchEngine, SearXngClient};
+use crate::search::{SearXngClient, SearchEngine};
 
-use super::{ListDirTool, ReadFileTool, ReadUrlTool, SearchTool, ShellTool, ToolRegistry, WriteFileTool};
+use super::{
+    ListDirTool, ReadFileTool, ReadUrlTool, SearchTool, ShellTool, ToolRegistry, WriteFileTool,
+};
 use crate::fs::FileTree;
 
 /// Build a ToolRegistry with default tools configured.
@@ -53,15 +55,21 @@ impl Default for ReadFileTool {
 }
 
 impl Default for WriteFileTool {
-    fn default() -> Self { Self::new() }
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl Default for ListDirTool {
-    fn default() -> Self { Self::new() }
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl Default for ShellTool {
-    fn default() -> Self { Self::new() }
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 // Helper for ListDirTool

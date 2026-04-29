@@ -1,10 +1,11 @@
+use anyhow::{Context, Result};
 use std::fs;
 use std::path::{Path, PathBuf};
-use anyhow::{Context, Result};
 
 pub fn write_file(path: &Path, content: &str) -> Result<()> {
     if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent).context(format!("Failed to create directory: {}", parent.display()))?;
+        fs::create_dir_all(parent)
+            .context(format!("Failed to create directory: {}", parent.display()))?;
     }
     fs::write(path, content).context(format!("Failed to write file: {}", path.display()))
 }

@@ -9,8 +9,8 @@ use ratatui::{
 
 use crate::app::{App, AppState, PlanStep, StepStatus, Tool};
 use crate::ui::layout::ColorScheme;
-use crate::ui::Spinner;
 use crate::ui::pane_title;
+use crate::ui::Spinner;
 
 pub fn render_plan(frame: &mut Frame, area: Rect, app: &App, spinner: &Spinner) {
     let colors = ColorScheme::default();
@@ -46,7 +46,10 @@ pub fn render_plan(frame: &mut Frame, area: Rect, app: &App, spinner: &Spinner) 
 
     if !steps.is_empty() {
         // Plan header: "plan (N/M)"
-        let done = steps.iter().filter(|s| s.status == StepStatus::Done).count();
+        let done = steps
+            .iter()
+            .filter(|s| s.status == StepStatus::Done)
+            .count();
         lines.push(Line::from(vec![
             Span::styled("plan ", Style::default().fg(colors.dim)),
             Span::styled(
@@ -64,7 +67,11 @@ pub fn render_plan(frame: &mut Frame, area: Rect, app: &App, spinner: &Spinner) 
     );
 }
 
-fn render_steps<'a>(steps: &'a [PlanStep], colors: &'a ColorScheme, spinner: &Spinner) -> Vec<Line<'a>> {
+fn render_steps<'a>(
+    steps: &'a [PlanStep],
+    colors: &'a ColorScheme,
+    spinner: &Spinner,
+) -> Vec<Line<'a>> {
     let mut lines = Vec::new();
     let last_idx = steps.len().saturating_sub(1);
 
@@ -73,15 +80,15 @@ fn render_steps<'a>(steps: &'a [PlanStep], colors: &'a ColorScheme, spinner: &Sp
         let prefix = if is_last { "└─ " } else { "├─ " };
 
         let (marker, marker_color) = match step.status {
-            StepStatus::Done    => ("●", colors.ink),
+            StepStatus::Done => ("●", colors.ink),
             StepStatus::Running => (spinner.frame(), colors.accent),
-            StepStatus::Queued  => ("○", colors.dim),
+            StepStatus::Queued => ("○", colors.dim),
         };
 
         let title_style = match step.status {
             StepStatus::Running => Style::default().fg(colors.ink).add_modifier(Modifier::BOLD),
-            StepStatus::Queued  => Style::default().fg(colors.dim),
-            StepStatus::Done    => Style::default().fg(colors.ink),
+            StepStatus::Queued => Style::default().fg(colors.dim),
+            StepStatus::Done => Style::default().fg(colors.ink),
         };
 
         let tool_str = format!("[{:6}]", tool_label(&step.tool));
@@ -121,12 +128,12 @@ fn render_steps<'a>(steps: &'a [PlanStep], colors: &'a ColorScheme, spinner: &Sp
 
 fn tool_label(tool: &Tool) -> &'static str {
     match tool {
-        Tool::Search  => "search",
-        Tool::Read    => "read",
-        Tool::Think   => "think",
-        Tool::Edit    => "edit",
-        Tool::Shell   => "shell",
+        Tool::Search => "search",
+        Tool::Read => "read",
+        Tool::Think => "think",
+        Tool::Edit => "edit",
+        Tool::Shell => "shell",
         Tool::ReadFile => "read_file",
-        Tool::ListDir  => "list_dir",
+        Tool::ListDir => "list_dir",
     }
 }

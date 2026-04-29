@@ -9,22 +9,23 @@ use reqwest::header::{HeaderMap, HeaderValue, AUTHORIZATION, CONTENT_TYPE};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 
-const OPENAI_API_URL: &str = "https://api.openai.com/v1/chat/completions";
-const PROVIDER_NAME: &str = "openai";
+const NVIDIA_API_URL: &str = "https://integrate.api.nvidia.com/v1/chat/completions";
+const NVIDIA_MODELS_URL: &str = "https://integrate.api.nvidia.com/v1/models";
+const PROVIDER_NAME: &str = "nvidia";
 
-pub struct OpenAiProvider {
+pub struct NvidiaProvider {
     api_key: Option<String>,
     client: reqwest::Client,
 }
 
 #[derive(Debug, Serialize)]
-struct OpenAiMessage {
+struct NvidiaMessage {
     role: String,
     content: String,
 }
 
 #[derive(Debug, Deserialize)]
-struct ChatCompletionChunk {
+struct NvidiaChatCompletionChunk {
     choices: Vec<Choice>,
 }
 #[derive(Debug, Deserialize)]
@@ -37,7 +38,7 @@ struct Delta {
     content: Option<String>,
 }
 
-impl OpenAiProvider {
+impl NvidiaProvider {
     pub fn new() -> Self {
         Self {
             api_key: None,
@@ -64,17 +65,29 @@ impl OpenAiProvider {
 
     fn map_http_error(status: reqwest::StatusCode) -> ProviderError {
         let msg = match status.as_u16() {
-            401 => "Authentication failed: Invalid API key (401)",
+            400 => "Bad request (400)",
+            401 => "Authentication failed (401)",
+            402 => "Payment required (402)",
+            403 => "Forbidden (403)",
+            404 => "Model not found or inaccessible (404)",
+            422 => "Validation error (422)",
             429 => "Rate limit exceeded (429)",
-            500..=599 => "OpenAI server error",
-            _ => "Request failed",
+            500..=599 => {
+                return std::io::Error::other(format!("NVIDIA server error (HTTP {})", status))
+                    .into()
+            }
+            _ => return std::io::Error::other(format!("Request failed (HTTP {})", status)).into(),
         };
         std::io::Error::other(msg).into()
     }
 }
 
+fn strip_model_prefix(model: &str) -> &str {
+    model.strip_prefix("nvidia/").unwrap_or(model)
+}
+
 #[async_trait]
-impl LlmProvider for OpenAiProvider {
+impl LlmProvider for NvidiaProvider {
     async fn stream_completion(
         &self,
         messages: &[Message],
@@ -82,9 +95,9 @@ impl LlmProvider for OpenAiProvider {
     ) -> Result<Vec<Chunk>, ProviderError> {
         let headers = self.build_headers()?;
 
-        let openai_messages: Vec<OpenAiMessage> = messages
+        let nvidia_messages: Vec<NvidiaMessage> = messages
             .iter()
-            .map(|m| OpenAiMessage {
+            .map(|m| NvidiaMessage {
                 role: match m.role {
                     Role::System => "system".into(),
                     Role::User => "user".into(),
@@ -94,11 +107,11 @@ impl LlmProvider for OpenAiProvider {
             })
             .collect();
 
-        let body = json!({"model": model, "messages": openai_messages, "stream": true});
+        let body = json!({"model": strip_model_prefix(model), "messages": nvidia_messages, "stream": true});
 
         let response = self
             .client
-            .post(OPENAI_API_URL)
+            .post(NVIDIA_API_URL)
             .headers(headers)
             .json(&body)
             .send()
@@ -107,7 +120,8 @@ impl LlmProvider for OpenAiProvider {
 
         let status = response.status();
         if !status.is_success() {
-            return Err(Self::map_http_error(status));
+            let body = response.text().await.unwrap_or_else(|_| "<no body>".into());
+            return Err(format!("NVIDIA API error (HTTP {}): {}", status, body.trim()).into());
         }
 
         let mut chunks = Vec::new();
@@ -122,7 +136,7 @@ impl LlmProvider for OpenAiProvider {
                     if data == "[DONE]" {
                         return Ok(chunks);
                     }
-                    if let Ok(chunk) = serde_json::from_str::<ChatCompletionChunk>(data) {
+                    if let Ok(chunk) = serde_json::from_str::<NvidiaChatCompletionChunk>(data) {
                         for choice in chunk.choices {
                             if let Some(content) = choice.delta.content {
                                 chunks.push(Chunk { content });
@@ -142,9 +156,9 @@ impl LlmProvider for OpenAiProvider {
         model: &str,
     ) -> Result<ToolResponse, ProviderError> {
         let headers = self.build_headers()?;
-        let openai_messages: Vec<OpenAiMessage> = messages
+        let nvidia_messages: Vec<NvidiaMessage> = messages
             .iter()
-            .map(|m| OpenAiMessage {
+            .map(|m| NvidiaMessage {
                 role: match m.role {
                     Role::System => "system".to_string(),
                     Role::User => "user".to_string(),
@@ -160,17 +174,16 @@ impl LlmProvider for OpenAiProvider {
         }).collect();
 
         let body = serde_json::json!({
-            "model": model,
-            "messages": openai_messages,
+            "model": strip_model_prefix(model),
+            "messages": nvidia_messages,
             "stream": false,
-            "tools": tool_entries
+            "tools": tool_entries,
+            "tool_choice": "auto"
         });
 
-        let mut req_builder = self.client.post(OPENAI_API_URL);
-        if let Some(ref key) = self.api_key {
-            req_builder = req_builder.bearer_auth(key);
-        }
-        let response = req_builder
+        let response = self
+            .client
+            .post(NVIDIA_API_URL)
             .headers(headers)
             .json(&body)
             .send()
@@ -178,7 +191,8 @@ impl LlmProvider for OpenAiProvider {
             .map_err(|e| format!("Request failed: {}", e))?;
         let status = response.status();
         if !status.is_success() {
-            return Err(Self::map_http_error(status));
+            let body = response.text().await.unwrap_or_else(|_| "<no body>".into());
+            return Err(format!("NVIDIA API error (HTTP {}): {}", status, body.trim()).into());
         }
 
         // Non-streaming: read full JSON response and extract tool calls if any
@@ -300,13 +314,15 @@ impl LlmProvider for OpenAiProvider {
         let headers = self.build_headers()?;
         let response = self
             .client
-            .get("https://api.openai.com/v1/models")
+            .get(NVIDIA_MODELS_URL)
             .headers(headers)
             .send()
             .await
             .map_err(|e| format!("Request failed: {}", e))?;
         if !response.status().is_success() {
-            return Err(Self::map_http_error(response.status()));
+            let status = response.status();
+            let body = response.text().await.unwrap_or_else(|_| "<no body>".into());
+            return Err(format!("NVIDIA API error (HTTP {}): {}", status, body.trim()).into());
         }
         #[derive(Deserialize)]
         struct Model {
@@ -328,8 +344,33 @@ impl LlmProvider for OpenAiProvider {
     }
 }
 
-impl Default for OpenAiProvider {
+impl Default for NvidiaProvider {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn test_new_provider() {
+        let p = NvidiaProvider::new();
+        assert_eq!(p.name(), "nvidia");
+        assert!(!p.is_authenticated());
+    }
+
+    #[test]
+    fn test_strip_model_prefix() {
+        let m = "nvidia/meta/llama-3.1-70b-instruct";
+        let stripped = strip_model_prefix(m);
+        assert_eq!(stripped, "meta/llama-3.1-70b-instruct");
+    }
+
+    #[test]
+    fn test_strip_model_prefix_no_prefix() {
+        let m = "meta/llama-3.1-70b-instruct";
+        let stripped = strip_model_prefix(m);
+        assert_eq!(stripped, m);
     }
 }

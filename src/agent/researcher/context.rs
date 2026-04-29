@@ -44,16 +44,17 @@ impl ResearcherContext {
                 ResearcherMessage::System { content } => content.len(),
                 ResearcherMessage::User { content } => content.len(),
                 ResearcherMessage::Assistant { content } => content.len(),
-                ResearcherMessage::AssistantWithToolCalls { content, tool_calls } => {
+                ResearcherMessage::AssistantWithToolCalls {
+                    content,
+                    tool_calls,
+                } => {
                     let mut n = content.as_ref().map(|c| c.len()).unwrap_or(0);
                     for tc in tool_calls {
                         n += tc.arguments.len() + tc.name.len();
                     }
                     n
                 }
-                ResearcherMessage::ToolResult { output, name, .. } => {
-                    output.len() + name.len()
-                }
+                ResearcherMessage::ToolResult { output, name, .. } => output.len() + name.len(),
             };
         }
         total / 4
@@ -204,7 +205,9 @@ mod tests {
     #[test]
     fn truncate_preserves_reasoning_preamble() {
         let mut ctx = ResearcherContext::with_budget(300);
-        ctx.push_message(ResearcherMessage::System { content: "You are helpful.".into() });
+        ctx.push_message(ResearcherMessage::System {
+            content: "You are helpful.".into(),
+        });
 
         for i in 0..3 {
             ctx.push_message(ResearcherMessage::ToolResult {
@@ -215,7 +218,9 @@ mod tests {
         }
 
         for i in 0..10 {
-            ctx.push_message(ResearcherMessage::User { content: "x".repeat(100) });
+            ctx.push_message(ResearcherMessage::User {
+                content: "x".repeat(100),
+            });
             ctx.push_message(ResearcherMessage::ToolResult {
                 call_id: format!("c{}", i),
                 name: "search".into(),
@@ -240,6 +245,9 @@ mod tests {
         let reasoning_after = ctx.messages.iter().filter(|m| {
             matches!(m, ResearcherMessage::ToolResult { name, .. } if name == "__reasoning_preamble")
         }).count();
-        assert_eq!(reasoning_after, 3, "All reasoning preambles should be preserved");
+        assert_eq!(
+            reasoning_after, 3,
+            "All reasoning preambles should be preserved"
+        );
     }
 }

@@ -1,6 +1,6 @@
+use super::leak;
 use comrak::nodes::{AstNode, NodeValue};
 use ratatui::text::{Line, Span};
-use super::leak;
 
 /// Collect plain text from inline children of a node.
 pub fn collect_inline_text<'a>(node: &'a AstNode<'a>) -> String {

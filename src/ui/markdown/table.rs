@@ -1,7 +1,7 @@
+use super::leak;
 use comrak::nodes::{AstNode, NodeValue};
 use ratatui::text::{Line, Span};
 use unicode_width::UnicodeWidthStr;
-use super::leak;
 
 /// Build a border line (top/sep/bottom) from column widths.
 fn make_border(left: &str, mid: &str, right: &str, widths: &[usize]) -> Line<'static> {
@@ -44,7 +44,9 @@ pub fn render_table<'a>(table_node: &'a AstNode<'a>, _width: u16) -> Vec<Line<'s
     for r in &rows {
         for (i, c) in r.iter().enumerate() {
             let w = UnicodeWidthStr::width(c.as_str());
-            if w > widths[i] { widths[i] = w; }
+            if w > widths[i] {
+                widths[i] = w;
+            }
         }
     }
 

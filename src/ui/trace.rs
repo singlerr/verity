@@ -7,8 +7,8 @@ use ratatui::{
     Frame,
 };
 
-use crate::app::TerminalLine;
 use super::layout::ColorScheme;
+use crate::app::TerminalLine;
 
 /// Render the trace log section: "trace.log" label + bordered log box.
 pub fn render_trace(frame: &mut Frame, area: Rect, app: &crate::app::App) {
@@ -36,7 +36,12 @@ pub fn render_trace(frame: &mut Frame, area: Rect, app: &crate::app::App) {
     };
 
     // Render label first (first row of the area)
-    let label_area = Rect { x: area.x, y: area.y, width: area.width, height: 1 };
+    let label_area = Rect {
+        x: area.x,
+        y: area.y,
+        width: area.width,
+        height: 1,
+    };
     let log_area = Rect {
         x: area.x,
         y: area.y + 1,
@@ -67,7 +72,7 @@ fn build_log_lines<'a>(trace_lines: &'a [TerminalLine], colors: &'a ColorScheme)
 
             let (tag_str, tag_style) = match line.kind {
                 crate::app::LineKind::Cmd => ("PLAN", Style::default().fg(colors.accent)),
-                crate::app::LineKind::Ok  => (" OK ", Style::default().fg(colors.success)),
+                crate::app::LineKind::Ok => (" OK ", Style::default().fg(colors.success)),
                 crate::app::LineKind::Dim => ("NET ", Style::default().fg(colors.net)),
                 crate::app::LineKind::Out => ("READ", Style::default().fg(colors.read)),
             };

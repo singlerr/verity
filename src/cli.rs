@@ -3,7 +3,12 @@ use clap::{Parser, Subcommand};
 use std::sync::Arc;
 use std::time::Duration;
 
-use crossterm::{cursor::Show, event::{Event, KeyEventKind}, terminal::{disable_raw_mode, is_raw_mode_enabled, EnterAlternateScreen, LeaveAlternateScreen}, ExecutableCommand};
+use crossterm::{
+    cursor::Show,
+    event::{DisableBracketedPaste, EnableBracketedPaste, Event, KeyEventKind},
+    terminal::{disable_raw_mode, is_raw_mode_enabled, EnterAlternateScreen, LeaveAlternateScreen},
+    ExecutableCommand,
+};
 use ratatui::backend::CrosstermBackend;
 use std::io::stdout;
 
@@ -11,6 +16,7 @@ use crate::agent::orchestrator::AgentEvent;
 use crate::auth::login::{AuthAction, AuthLoginScreen};
 use crate::auth::store::{AuthStatus, CredentialStore};
 use crate::config::Config;
+use crate::llm::provider::ModelEntry;
 use crate::llm::ProviderRegistry;
 use tokio::time::timeout;
 
@@ -25,7 +31,10 @@ pub struct Cli {
 
 #[derive(Subcommand)]
 pub enum Commands {
-    Auth { #[arg(long)] list: bool },
+    Auth {
+        #[arg(long)]
+        list: bool,
+    },
     /// Manage configuration
     Config {
         #[command(subcommand)]
@@ -65,6 +74,7 @@ pub fn setup_terminal() -> Result<ratatui::Terminal<CrosstermBackend<std::io::St
 }
 
 pub fn restore_terminal() {
+    stdout().execute(DisableBracketedPaste).ok();
     stdout().execute(LeaveAlternateScreen).ok();
     disable_raw_mode().ok();
     stdout().execute(Show).ok();
@@ -72,7 +82,12 @@ pub fn restore_terminal() {
 
 pub fn fallback_models(provider: &str) -> Vec<String> {
     match provider {
-        "openai" => vec!["gpt-4o".into(), "gpt-4o-mini".into(), "gpt-4-turbo".into(), "gpt-3.5-turbo".into()],
+        "openai" => vec![
+            "gpt-4o".into(),
+            "gpt-4o-mini".into(),
+            "gpt-4-turbo".into(),
+            "gpt-3.5-turbo".into(),
+        ],
         "anthropic" => vec![
             "claude-opus-4-5".into(),
             "claude-sonnet-4-5".into(),
@@ -86,29 +101,41 @@ pub fn fallback_models(provider: &str) -> Vec<String> {
             "gemini-1.5-pro".into(),
             "gemini-1.5-flash".into(),
         ],
+        "nvidia" => vec![],
         _ => vec![],
     }
 }
 
-/// Fetch model list from provider registry and emit to the given channel
+/// Fetch model list from provider registry and emit to the given channel.
+/// Only includes models from providers that support tool calling.
 pub async fn fetch_model_list(pr: Arc<ProviderRegistry>, tx: std::sync::mpsc::Sender<AgentEvent>) {
     let cred_store = CredentialStore::load().unwrap_or_default();
-    let mut all_models: Vec<String> = Vec::new();
-    for provider_name in &["anthropic", "openai", "google", "ollama"] {
+    let mut all_entries: Vec<ModelEntry> = Vec::new();
+    for provider_name in &["openai", "nvidia"] {
         if let Some(handle) = pr.get(provider_name) {
             if let Some(creds) = cred_store.get(provider_name) {
                 let mut w = handle.write().await;
                 let _ = w.authenticate(&creds.api_key).await;
             }
             let lock = handle.read().await;
+            if !lock.supports_tool_calling() {
+                continue;
+            }
             let models = match timeout(Duration::from_secs(5), lock.list_models()).await {
                 Ok(Ok(list)) => list,
                 _ => fallback_models(provider_name),
             };
-            all_models.extend(models);
+            let entries: Vec<ModelEntry> = models
+                .into_iter()
+                .map(|name| ModelEntry {
+                    name,
+                    provider: provider_name.to_string(),
+                })
+                .collect();
+            all_entries.extend(entries);
         }
     }
-    let _ = tx.send(AgentEvent::ModelListReady(all_models));
+    let _ = tx.send(AgentEvent::ModelListReady(all_entries));
 }
 
 pub async fn handle_command(cmd: Commands) -> Result<()> {
@@ -153,16 +180,21 @@ pub fn run_auth_screen() -> Result<()> {
     while crossterm::event::poll(std::time::Duration::ZERO)? {
         crossterm::event::read()?;
     }
+    stdout().execute(EnableBracketedPaste)?;
     let mut screen = AuthLoginScreen::new()?;
     loop {
         terminal.draw(|frame| screen.render(frame, frame.area()))?;
-        if let Ok(Event::Key(key_event)) = crossterm::event::read() {
-            if key_event.kind == KeyEventKind::Press {
+        match crossterm::event::read() {
+            Ok(Event::Key(key_event)) if key_event.kind == KeyEventKind::Press => {
                 match screen.handle_key(key_event) {
                     AuthAction::Quit | AuthAction::Done => break,
                     AuthAction::Continue => {}
                 }
             }
+            Ok(Event::Paste(text)) => {
+                screen.handle_paste(text);
+            }
+            _ => {}
         }
     }
     restore_terminal();

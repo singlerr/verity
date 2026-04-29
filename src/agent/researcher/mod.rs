@@ -1,9 +1,9 @@
 //! Researcher loop module — context window management and message types.
 
 pub mod context;
-pub mod prompt;
 pub mod loop_module;
 pub mod picker;
+pub mod prompt;
 
 use crate::llm::provider::ToolCall;
 
@@ -11,9 +11,15 @@ use crate::llm::provider::ToolCall;
 /// Separate from `Message` in llm/provider.rs (which has Role::System/User/Assistant only).
 #[derive(Debug, Clone)]
 pub enum ResearcherMessage {
-    System { content: String },
-    User { content: String },
-    Assistant { content: String },
+    System {
+        content: String,
+    },
+    User {
+        content: String,
+    },
+    Assistant {
+        content: String,
+    },
     AssistantWithToolCalls {
         content: Option<String>,
         tool_calls: Vec<ToolCall>,
@@ -28,10 +34,10 @@ pub enum ResearcherMessage {
 /// Research depth preset — controls max iterations for the researcher loop.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum ResearchDepth {
-    Speed,         // max 2 iterations
+    Speed, // max 2 iterations
     #[default]
-    Balanced,      // max 6 iterations (default)
-    Quality,       // max 25 iterations
+    Balanced, // max 6 iterations (default)
+    Quality, // max 25 iterations
 }
 
 impl ResearchDepth {
@@ -119,9 +125,18 @@ mod tests {
     #[test]
     fn depth_parse() {
         assert_eq!(ResearchDepth::parse_depth("speed"), ResearchDepth::Speed);
-        assert_eq!(ResearchDepth::parse_depth("balanced"), ResearchDepth::Balanced);
-        assert_eq!(ResearchDepth::parse_depth("quality"), ResearchDepth::Quality);
-        assert_eq!(ResearchDepth::parse_depth("unknown"), ResearchDepth::Balanced);
+        assert_eq!(
+            ResearchDepth::parse_depth("balanced"),
+            ResearchDepth::Balanced
+        );
+        assert_eq!(
+            ResearchDepth::parse_depth("quality"),
+            ResearchDepth::Quality
+        );
+        assert_eq!(
+            ResearchDepth::parse_depth("unknown"),
+            ResearchDepth::Balanced
+        );
     }
 
     #[test]
@@ -201,8 +216,14 @@ mod tests {
     #[test]
     fn provider_action_variants() {
         assert_eq!(ProviderAction::SearchOnly, ProviderAction::SearchOnly);
-        assert_eq!(ProviderAction::SearchAndScrape, ProviderAction::SearchAndScrape);
-        assert_eq!(ProviderAction::SearchPickScrapeExtract, ProviderAction::SearchPickScrapeExtract);
+        assert_eq!(
+            ProviderAction::SearchAndScrape,
+            ProviderAction::SearchAndScrape
+        );
+        assert_eq!(
+            ProviderAction::SearchPickScrapeExtract,
+            ProviderAction::SearchPickScrapeExtract
+        );
     }
 }
 pub mod extractor;

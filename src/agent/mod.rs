@@ -4,18 +4,21 @@ pub use planner::AgentPlanner;
 
 pub mod tools;
 
-pub use tools::{Tool, ToolRegistry, SearchTool, ReadUrlTool, ReadFileTool, WriteFileTool, ListDirTool, ShellTool, build_tool_registry, tool_manifest};
+pub use tools::{
+    build_tool_registry, tool_manifest, ListDirTool, ReadFileTool, ReadUrlTool, SearchTool,
+    ShellTool, Tool, ToolRegistry, WriteFileTool,
+};
 
 pub mod classifier;
 pub mod executor;
 
-pub use classifier::{QueryIntent, ClassifiedIntent};
+pub use classifier::{ClassifiedIntent, QueryIntent};
 
 pub mod researcher;
-pub use researcher::{ResearcherContext, ResearcherMessage, ResearchDepth};
+pub use researcher::{ResearchDepth, ResearcherContext, ResearcherMessage};
 
 // Expose orchestrator and common event types for MVP
 pub mod synthesizer;
 
 pub mod orchestrator;
-pub use orchestrator::{AgentOrchestrator, AgentEvent, Answer};
+pub use orchestrator::{AgentEvent, AgentOrchestrator, Answer};

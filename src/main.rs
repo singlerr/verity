@@ -1,10 +1,10 @@
 //! Verity TUI — Entry point.
 
 use anyhow::Result;
+use clap::Parser;
 use std::sync::{Arc, Mutex};
 use std::thread;
 use tokio_util::sync::CancellationToken;
-use clap::Parser;
 
 use verity::agent::orchestrator::AgentEvent;
 use verity::app::App;
@@ -26,7 +26,9 @@ async fn main() -> Result<()> {
     let (tokio_tx, tokio_rx) = tokio::sync::mpsc::channel::<AgentEvent>(100);
     thread::spawn(move || {
         while let Ok(event) = std_rx.recv() {
-            if tokio_tx.blocking_send(event).is_err() { break; }
+            if tokio_tx.blocking_send(event).is_err() {
+                break;
+            }
         }
     });
     let app = App::new();

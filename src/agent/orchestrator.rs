@@ -1,17 +1,17 @@
-use std::sync::Arc;
 use std::sync::mpsc;
+use std::sync::Arc;
 
-use async_trait::async_trait;
-use crate::app::{PlanStep, Source, AnswerChunk};
-use crate::agent::planner::AgentPlanner;
-use crate::agent::tools::ToolRegistry;
 use crate::agent::classifier::{QueryClassifier, QueryIntent};
-use crate::agent::researcher::{ResearcherLoop, ResearchDepth, ResearcherOutput};
+use crate::agent::planner::AgentPlanner;
+use crate::agent::researcher::{ResearchDepth, ResearcherLoop, ResearcherOutput};
 use crate::agent::synthesizer::ResearchSynthesizer;
+use crate::agent::tools::ToolRegistry;
+use crate::app::{AnswerChunk, PlanStep, Source};
 use crate::llm::provider::{
-    LlmProvider, ProviderRegistry, ProviderHandle, ProviderError,
-    Message, Chunk, ToolDefinition, ToolResponse,
+    Chunk, LlmProvider, Message, ModelEntry, ProviderError, ProviderHandle, ProviderRegistry,
+    ToolDefinition, ToolResponse,
 };
+use async_trait::async_trait;
 use tokio_util::sync::CancellationToken;
 
 /// Public answer container.
@@ -32,7 +32,7 @@ pub enum AgentEvent {
     AnswerChunk(AnswerChunk),
     Done(Answer),
     Error(String),
-    ModelListReady(Vec<String>),
+    ModelListReady(Vec<ModelEntry>),
     Classified(QueryIntent),
     SearchingIteration { current: u8, max: u8, query: String },
 }
@@ -46,27 +46,44 @@ struct ProviderHandleAdapter {
 
 impl ProviderHandleAdapter {
     fn new(handle: ProviderHandle) -> Self {
-        Self { handle, name_str: "provider".to_string() }
+        Self {
+            handle,
+            name_str: "provider".to_string(),
+        }
     }
     fn new_with_name(handle: ProviderHandle, name: String) -> Self {
-        Self { handle, name_str: name }
+        Self {
+            handle,
+            name_str: name,
+        }
     }
 }
 
 #[async_trait]
 impl LlmProvider for ProviderHandleAdapter {
-    async fn stream_completion(&self, messages: &[Message], model: &str) -> Result<Vec<Chunk>, ProviderError> {
+    async fn stream_completion(
+        &self,
+        messages: &[Message],
+        model: &str,
+    ) -> Result<Vec<Chunk>, ProviderError> {
         let lock = self.handle.read().await;
         lock.stream_completion(messages, model).await
     }
     async fn complete_with_tools(
-        &self, messages: &[Message], tools: &[ToolDefinition], model: &str,
+        &self,
+        messages: &[Message],
+        tools: &[ToolDefinition],
+        model: &str,
     ) -> Result<ToolResponse, ProviderError> {
         let lock = self.handle.read().await;
         lock.complete_with_tools(messages, tools, model).await
     }
-    fn name(&self) -> &str { &self.name_str }
-    fn is_authenticated(&self) -> bool { true } // authenticated before adapter creation
+    fn name(&self) -> &str {
+        &self.name_str
+    }
+    fn is_authenticated(&self) -> bool {
+        true
+    } // authenticated before adapter creation
     async fn authenticate(&mut self, api_key: &str) -> Result<(), ProviderError> {
         let mut lock = self.handle.write().await;
         lock.authenticate(api_key).await
@@ -80,7 +97,7 @@ impl LlmProvider for ProviderHandleAdapter {
         lock.list_models().await
     }
     fn supports_tool_calling(&self) -> bool {
-        self.name_str == "openai"
+        matches!(self.name_str.as_str(), "openai" | "nvidia")
     }
 }
 
@@ -101,10 +118,21 @@ impl AgentOrchestrator {
         model: String,
     ) -> Self {
         let classifier = QueryClassifier::new(provider_registry.clone(), model.clone());
-        Self { planner, tools, provider_registry, model, classifier }
+        Self {
+            planner,
+            tools,
+            provider_registry,
+            model,
+            classifier,
+        }
     }
 
-    pub async fn run(&self, query: &str, tx: mpsc::Sender<AgentEvent>, cancel_token: CancellationToken) {
+    pub async fn run(
+        &self,
+        query: &str,
+        tx: mpsc::Sender<AgentEvent>,
+        cancel_token: CancellationToken,
+    ) {
         // Phase 1: Classify
         let classified = self.classifier.classify(query).await;
         let _ = tx.send(AgentEvent::Classified(classified.intent.clone()));
@@ -137,23 +165,33 @@ impl AgentOrchestrator {
                 let _ = w.authenticate(&creds.api_key).await;
             }
         }
-        let provider: Arc<dyn LlmProvider> =
-            Arc::new(ProviderHandleAdapter::new_with_name(provider_handle, provider_name.clone()));
+        let provider: Arc<dyn LlmProvider> = Arc::new(ProviderHandleAdapter::new_with_name(
+            provider_handle,
+            provider_name.clone(),
+        ));
 
         // Check tool calling support for non-trivial research
         if !classified.skip_search && !provider.supports_tool_calling() {
             let _ = tx.send(AgentEvent::Error(
-                "Deep Research requires a model with tool calling support. Please select an OpenAI model (e.g., gpt-4o, gpt-4). You can use /model to change models.".into()
+                "Deep Research requires a model with tool calling support. Please select an OpenAI or NVIDIA model (e.g., gpt-4o, nvidia/meta/llama-3.1-70b-instruct). You can use /model to change models.".into()
             ));
             return;
         }
 
         // Phase 2: Research (skip if DirectAnswer)
         let output = if classified.skip_search {
-            ResearcherOutput { answer: String::new(), sources: Vec::new(), iterations_used: 0, extracted_facts: Vec::new() }
+            ResearcherOutput {
+                answer: String::new(),
+                sources: Vec::new(),
+                iterations_used: 0,
+                extracted_facts: Vec::new(),
+            }
         } else {
             let researcher = ResearcherLoop::new(
-                provider.clone(), self.model.clone(), self.tools.clone(), cancel_token.clone(),
+                provider.clone(),
+                self.model.clone(),
+                self.tools.clone(),
+                cancel_token.clone(),
             );
             match researcher.run(query, depth, &tx).await {
                 Ok(out) => out,
@@ -171,7 +209,10 @@ impl AgentOrchestrator {
 
         // Phase 3: Synthesize
         let synthesizer = ResearchSynthesizer::new(provider, &self.model);
-        let (final_text, final_sources) = match synthesizer.synthesize(query, &output.sources, depth, &output.extracted_facts).await {
+        let (final_text, final_sources) = match synthesizer
+            .synthesize(query, &output.sources, depth, &output.extracted_facts)
+            .await
+        {
             Ok(synth) => (synth.text, output.sources),
             Err(_) => (output.answer, output.sources), // fallback to researcher answer
         };
@@ -179,12 +220,19 @@ impl AgentOrchestrator {
         // Emit answer chunks (split by paragraph for progressive rendering)
         for chunk_text in final_text.split("\n\n") {
             let chunk = AnswerChunk {
-                text: chunk_text.to_string(), is_code: false, is_bold: false, is_em: false, citations: vec![],
+                text: chunk_text.to_string(),
+                is_code: false,
+                is_bold: false,
+                is_em: false,
+                citations: vec![],
             };
             let _ = tx.send(AgentEvent::AnswerChunk(chunk));
         }
 
-        let _ = tx.send(AgentEvent::Done(Answer { text: final_text, sources: final_sources }));
+        let _ = tx.send(AgentEvent::Done(Answer {
+            text: final_text,
+            sources: final_sources,
+        }));
     }
 }
 
@@ -200,20 +248,43 @@ mod tests {
         let rt = tokio::runtime::Runtime::new().unwrap();
         rt.block_on(async {
             let mock = MockLlmProvider::new(vec![]);
-            let handle = Arc::new(RwLock::new(Box::new(mock) as Box<dyn LlmProvider + Send + Sync>));
+            let handle = Arc::new(RwLock::new(
+                Box::new(mock) as Box<dyn LlmProvider + Send + Sync>
+            ));
             let adapter = ProviderHandleAdapter::new_with_name(handle, "openai".to_string());
-            assert!(adapter.supports_tool_calling(), "openai provider should support tool calling");
+            assert!(
+                adapter.supports_tool_calling(),
+                "openai provider should support tool calling"
+            );
 
             let mock2 = MockLlmProvider::without_tool_calling();
-            let handle2 = Arc::new(RwLock::new(Box::new(mock2) as Box<dyn LlmProvider + Send + Sync>));
+            let handle2 = Arc::new(RwLock::new(
+                Box::new(mock2) as Box<dyn LlmProvider + Send + Sync>
+            ));
             let adapter2 = ProviderHandleAdapter::new_with_name(handle2, "ollama".to_string());
-            assert!(!adapter2.supports_tool_calling(), "non-openai provider should not support tool calling");
+            assert!(
+                !adapter2.supports_tool_calling(),
+                "non-openai provider should not support tool calling"
+            );
+
+            let mock3 = MockLlmProvider::new(vec![]);
+            let handle3 = Arc::new(RwLock::new(
+                Box::new(mock3) as Box<dyn LlmProvider + Send + Sync>
+            ));
+            let adapter3 = ProviderHandleAdapter::new_with_name(handle3, "nvidia".to_string());
+            assert!(
+                adapter3.supports_tool_calling(),
+                "nvidia provider should support tool calling"
+            );
         });
     }
 
     #[test]
     fn orchestrator_rejects_non_tool_calling_provider() {
         let mock = MockLlmProvider::without_tool_calling();
-        assert!(!mock.supports_tool_calling(), "Mock without tool calling returns false");
+        assert!(
+            !mock.supports_tool_calling(),
+            "Mock without tool calling returns false"
+        );
     }
 }

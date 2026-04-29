@@ -31,7 +31,7 @@ pub fn render_error_overlay(frame: &mut Frame, area: Rect, title: &str, message:
         .direction(Direction::Vertical)
         .constraints([
             Constraint::Length(2), // title
-            Constraint::Min(1),   // message
+            Constraint::Min(1),    // message
             Constraint::Length(2), // footer
         ])
         .margin(1)
@@ -39,23 +39,19 @@ pub fn render_error_overlay(frame: &mut Frame, area: Rect, title: &str, message:
 
     // Title
     frame.render_widget(
-        Paragraph::new(Line::from(vec![
-            ratatui::text::Span::styled(
-                format!("⚠ {}", title),
-                Style::default().fg(colors.accent).add_modifier(Modifier::BOLD),
-            ),
-        ]))
+        Paragraph::new(Line::from(vec![ratatui::text::Span::styled(
+            format!("⚠ {}", title),
+            Style::default()
+                .fg(colors.accent)
+                .add_modifier(Modifier::BOLD),
+        )]))
         .style(Style::default().bg(colors.bg)),
         chunks[0],
     );
 
     // Message
     frame.render_widget(
-        Paragraph::new(message).style(
-            Style::default()
-                .fg(colors.ink)
-                .bg(colors.bg),
-        ),
+        Paragraph::new(message).style(Style::default().fg(colors.ink).bg(colors.bg)),
         chunks[1],
     );
 

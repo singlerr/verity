@@ -1,38 +1,43 @@
 //! UI module: layout and rendering.
+pub mod answer;
 pub mod autocomplete;
 pub mod command;
+pub mod error;
 pub mod header;
 pub mod layout;
 pub mod markdown;
-pub mod answer;
-pub mod spinner;
-pub mod error;
-pub mod status;
 pub mod model_select;
+pub mod spinner;
+pub mod status;
 
 // Re-exports for convenience
-pub use markdown::render_markdown;
 pub use answer::render_answer;
+pub use markdown::render_markdown;
 pub mod plan;
 pub mod sources;
 pub mod trace;
 
 pub use command::render_command;
+pub use error::render_error_overlay;
 pub use header::render_header;
-pub use layout::{ColorScheme, AppLayout, compute_layout, render_layout};
+pub use layout::{compute_layout, render_layout, AppLayout, ColorScheme};
+pub use model_select::render_model_select_popup;
 pub use plan::render_plan;
 pub use sources::render_sources;
-pub use trace::render_trace;
 pub use spinner::Spinner;
-pub use error::render_error_overlay;
 pub use status::render_status_bar;
-pub use model_select::render_model_select_popup;
+pub use trace::render_trace;
 
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 
 /// Render a pane title bar: `▎ TITLE ─────── right`
-pub fn pane_title(title: &str, right: &str, width: u16, colors: &layout::ColorScheme) -> Line<'static> {
+pub fn pane_title(
+    title: &str,
+    right: &str,
+    width: u16,
+    colors: &layout::ColorScheme,
+) -> Line<'static> {
     let prefix_len = 2usize; // "▎ "
     let title_len = title.len();
     let space_after_title = 1usize;
@@ -43,7 +48,9 @@ pub fn pane_title(title: &str, right: &str, width: u16, colors: &layout::ColorSc
     let mut spans: Vec<Span<'static>> = vec![
         Span::styled(
             "▎ ",
-            Style::default().fg(colors.accent).add_modifier(Modifier::BOLD),
+            Style::default()
+                .fg(colors.accent)
+                .add_modifier(Modifier::BOLD),
         ),
         Span::styled(
             title.to_string(),
@@ -54,7 +61,10 @@ pub fn pane_title(title: &str, right: &str, width: u16, colors: &layout::ColorSc
     ];
     if !right.is_empty() {
         spans.push(Span::raw(" "));
-        spans.push(Span::styled(right.to_string(), Style::default().fg(colors.dim)));
+        spans.push(Span::styled(
+            right.to_string(),
+            Style::default().fg(colors.dim),
+        ));
     }
     Line::from(spans)
 }

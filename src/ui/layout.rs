@@ -37,8 +37,8 @@ impl Default for ColorScheme {
 /// Layout regions for the application.
 pub struct AppLayout {
     pub header: Rect,
-    pub left: Rect,   // agent plan + trace
-    pub right: Rect,  // sources + answer
+    pub left: Rect,  // agent plan + trace
+    pub right: Rect, // sources + answer
     pub status: Rect,
     pub command: Rect,
 }
@@ -49,7 +49,7 @@ pub fn compute_layout(area: Rect) -> AppLayout {
         .direction(Direction::Vertical)
         .constraints([
             Constraint::Length(1), // header
-            Constraint::Min(0),   // middle (splits horizontally)
+            Constraint::Min(0),    // middle (splits horizontally)
             Constraint::Length(1), // status
             Constraint::Length(1), // command
         ])
@@ -58,10 +58,7 @@ pub fn compute_layout(area: Rect) -> AppLayout {
     let middle = vertical[1];
     let horizontal = Layout::default()
         .direction(Direction::Horizontal)
-        .constraints([
-            Constraint::Percentage(50),
-            Constraint::Percentage(50),
-        ])
+        .constraints([Constraint::Percentage(50), Constraint::Percentage(50)])
         .split(middle);
 
     AppLayout {
@@ -81,10 +78,7 @@ pub fn render_layout(frame: &mut ratatui::Frame, app: &crate::app::App) {
     let colors = ColorScheme::default();
 
     // Fill background
-    frame.render_widget(
-        Block::default().style(Style::default().bg(colors.bg)),
-        area,
-    );
+    frame.render_widget(Block::default().style(Style::default().bg(colors.bg)), area);
 
     let layout = compute_layout(area);
 
@@ -108,10 +102,7 @@ pub fn render_layout(frame: &mut ratatui::Frame, app: &crate::app::App) {
     let trace_height = 9u16; // "trace.log" label + 8 log rows
     let left_split = Layout::default()
         .direction(Direction::Vertical)
-        .constraints([
-            Constraint::Min(0),
-            Constraint::Length(trace_height),
-        ])
+        .constraints([Constraint::Min(0), Constraint::Length(trace_height)])
         .split(left_inner);
 
     crate::ui::plan::render_plan(frame, left_split[0], app, &app.spinner);
@@ -121,10 +112,7 @@ pub fn render_layout(frame: &mut ratatui::Frame, app: &crate::app::App) {
     let source_rows = (app.sources.len().min(6) + 3) as u16; // pane_title + entries + spacing
     let right_split = Layout::default()
         .direction(Direction::Vertical)
-        .constraints([
-            Constraint::Length(source_rows.max(4)),
-            Constraint::Min(0),
-        ])
+        .constraints([Constraint::Length(source_rows.max(4)), Constraint::Min(0)])
         .split(layout.right);
 
     crate::ui::sources::render_sources(frame, right_split[0], app);
@@ -138,7 +126,12 @@ pub fn render_layout(frame: &mut ratatui::Frame, app: &crate::app::App) {
 
     // Autocomplete popup — rendered above the command bar, overlays content
     if app.focus == crate::app::Focus::Command {
-        crate::ui::autocomplete::render_popup(frame, layout.command, &app.query, app.autocomplete_idx);
+        crate::ui::autocomplete::render_popup(
+            frame,
+            layout.command,
+            &app.query,
+            app.autocomplete_idx,
+        );
     }
 
     // Show cursor at end of query input when focused on command bar

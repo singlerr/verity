@@ -1,6 +1,6 @@
+use anyhow::{Context, Result};
 use std::path::Path;
 use std::time::Instant;
-use anyhow::{Context, Result};
 use tokio::process::Command;
 
 const _DEFAULT_TIMEOUT_MS: u64 = 30_000;

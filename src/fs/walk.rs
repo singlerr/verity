@@ -1,10 +1,19 @@
+use anyhow::{Context, Result};
 use std::fs;
 use std::path::Path;
-use anyhow::{Context, Result};
 
 const SKIP_DIRS: &[&str] = &[
-    ".git", "node_modules", "target", ".vscode", "__pycache__", ".idea",
-    "dist", "build", ".cache", ".temp", ".tmp",
+    ".git",
+    "node_modules",
+    "target",
+    ".vscode",
+    "__pycache__",
+    ".idea",
+    "dist",
+    "build",
+    ".cache",
+    ".temp",
+    ".tmp",
 ];
 
 #[derive(Debug, Clone)]
@@ -26,7 +35,12 @@ impl FileTree {
     }
 
     fn with_children(name: String, is_dir: bool, children: Vec<FileTree>, size: u64) -> Self {
-        Self { name, children, is_dir, size }
+        Self {
+            name,
+            children,
+            is_dir,
+            size,
+        }
     }
 }
 
@@ -40,10 +54,16 @@ pub fn walk_dir(path: &Path) -> Result<FileTree> {
         .map(|n| n.to_string_lossy().to_string())
         .unwrap_or_else(|| path.to_string_lossy().to_string());
 
-    let metadata = fs::metadata(path).context(format!("Failed to read metadata: {}", path.display()))?;
+    let metadata =
+        fs::metadata(path).context(format!("Failed to read metadata: {}", path.display()))?;
 
     if metadata.is_file() {
-        return Ok(FileTree::with_children(name, false, Vec::new(), metadata.len()));
+        return Ok(FileTree::with_children(
+            name,
+            false,
+            Vec::new(),
+            metadata.len(),
+        ));
     }
 
     let mut children = Vec::new();

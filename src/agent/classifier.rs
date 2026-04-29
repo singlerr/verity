@@ -1,7 +1,7 @@
-use std::sync::Arc;
-use serde::Deserialize;
-use crate::llm::provider::{Message, Role, ProviderRegistry};
 use crate::auth::store::CredentialStore;
+use crate::llm::provider::{Message, ProviderRegistry, Role};
+use serde::Deserialize;
+use std::sync::Arc;
 
 #[derive(Debug, Clone, PartialEq, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -90,7 +90,10 @@ IMPORTANT: For web_research or mixed, provide 1-3 specific, reformulated search 
                 }
             }
             let provider_guard = provider_handle.read().await;
-            if let Ok(chunks) = provider_guard.stream_completion(&messages, &self.model).await {
+            if let Ok(chunks) = provider_guard
+                .stream_completion(&messages, &self.model)
+                .await
+            {
                 let json_str: String = chunks.into_iter().map(|c| c.content).collect::<String>();
                 let mut json_text = json_str.trim().to_string();
                 if json_text.starts_with("```json") {
@@ -116,7 +119,9 @@ IMPORTANT: For web_research or mixed, provide 1-3 specific, reformulated search 
                         search_queries: resp.search_queries,
                         reasoning: resp.reasoning,
                         skip_search: resp.skip_search.unwrap_or(false),
-                        source_types: resp.source_types.unwrap_or_else(|| vec![SourceType::General]),
+                        source_types: resp
+                            .source_types
+                            .unwrap_or_else(|| vec![SourceType::General]),
                         quality: resp.quality.unwrap_or(false),
                     };
                 } else {
@@ -171,7 +176,8 @@ mod tests {
 
     #[test]
     fn parse_valid_web_research() {
-        let json = r#"{"intent":"web_research","search_queries":["rust async"],"reasoning":"test"}"#;
+        let json =
+            r#"{"intent":"web_research","search_queries":["rust async"],"reasoning":"test"}"#;
         let v: serde_json::Value = serde_json::from_str(json).unwrap();
         assert_eq!(v["intent"], "web_research");
     }

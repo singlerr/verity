@@ -3,6 +3,7 @@ use std::time::{Duration, Instant};
 // Import AgentEvent type for wiring agent events into the UI
 use crate::agent::orchestrator::AgentEvent;
 use crate::agent::researcher::ResearchDepth;
+use crate::llm::provider::ModelEntry;
 use crate::ui::spinner::Spinner;
 
 pub mod types;
@@ -26,7 +27,7 @@ pub struct App {
     pub spinner: Spinner,
     pub autocomplete_idx: usize,
     pub model_select_open: bool,
-    pub model_list: Vec<String>,
+    pub model_list: Vec<ModelEntry>,
     pub selected_model_idx: usize,
     pub active_model: String,
     pub answer_scroll: u16,
@@ -111,9 +112,13 @@ impl App {
                 self.model_list = models;
             }
             AgentEvent::Classified(_intent) => {
-            self.state = AppState::Classifying;
+                self.state = AppState::Classifying;
             }
-            AgentEvent::SearchingIteration { current, max, query } => {
+            AgentEvent::SearchingIteration {
+                current,
+                max,
+                query,
+            } => {
                 self.state = AppState::Researching;
                 self.trace_lines.push(TerminalLine {
                     kind: LineKind::Out,

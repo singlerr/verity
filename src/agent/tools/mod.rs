@@ -1,9 +1,9 @@
 //! Agent tool implementations for search, URL reading, and file reading.
 
-pub mod registry;
 pub mod local;
+pub mod registry;
+pub use local::{ListDirTool, ShellTool, WriteFileTool};
 pub use registry::{build_tool_registry, tool_manifest};
-pub use local::{WriteFileTool, ListDirTool, ShellTool};
 
 use crate::fs::read::read_file;
 use crate::search::{SearchEngine, SearchResult};
@@ -41,18 +41,21 @@ impl Tool for SearchTool {
 
     async fn execute(&self, input: &Value) -> Result<Value> {
         let max_queries = 3;
-        let queries: Vec<String> = if let Some(queries_array) = input.get("queries").and_then(|v| v.as_array()) {
-            queries_array
-                .iter()
-                .take(max_queries)
-                .filter_map(|v| v.as_str().map(String::from))
-                .filter(|s| !s.is_empty())
-                .collect()
-        } else if let Some(single_query) = input.get("query").and_then(|v| v.as_str()) {
-            vec![single_query.to_string()]
-        } else {
-            return Err(anyhow::anyhow!("Missing 'query' or 'queries' field in input"));
-        };
+        let queries: Vec<String> =
+            if let Some(queries_array) = input.get("queries").and_then(|v| v.as_array()) {
+                queries_array
+                    .iter()
+                    .take(max_queries)
+                    .filter_map(|v| v.as_str().map(String::from))
+                    .filter(|s| !s.is_empty())
+                    .collect()
+            } else if let Some(single_query) = input.get("query").and_then(|v| v.as_str()) {
+                vec![single_query.to_string()]
+            } else {
+                return Err(anyhow::anyhow!(
+                    "Missing 'query' or 'queries' field in input"
+                ));
+            };
 
         if queries.is_empty() {
             return Err(anyhow::anyhow!("No valid queries provided"));
@@ -138,7 +141,10 @@ impl Tool for ReadUrlTool {
             .await
             .context("Failed to fetch URL")?;
 
-        let html = response.text().await.context("Failed to read response body")?;
+        let html = response
+            .text()
+            .await
+            .context("Failed to read response body")?;
         let title = self.extract_title(&html).unwrap_or_else(|| url.to_string());
         let text = html2text::from_read(html.as_bytes(), 80);
         let truncated: String = text.chars().take(5000).collect();
@@ -232,7 +238,10 @@ mod tests {
         }
 
         fn with_result(self, query: &str, results: Vec<SearchResult>) -> Self {
-            self.results.lock().unwrap().insert(query.to_string(), results);
+            self.results
+                .lock()
+                .unwrap()
+                .insert(query.to_string(), results);
             self
         }
     }
@@ -259,8 +268,16 @@ mod tests {
         let mock = MockSearchEngine::new().with_result(
             "rust programming",
             vec![
-                make_result("Rust Book", "https://rust-lang.org/book", "The Rust programming language"),
-                make_result("Rust By Example", "https://rust-lang.org/examples", "Learn Rust by example"),
+                make_result(
+                    "Rust Book",
+                    "https://rust-lang.org/book",
+                    "The Rust programming language",
+                ),
+                make_result(
+                    "Rust By Example",
+                    "https://rust-lang.org/examples",
+                    "Learn Rust by example",
+                ),
             ],
         );
         let tool = SearchTool::new(Arc::new(mock));
@@ -270,7 +287,10 @@ mod tests {
 
         let results = result.get("results").unwrap().as_array().unwrap();
         assert_eq!(results.len(), 2);
-        assert_eq!(results[0].get("title").unwrap().as_str().unwrap(), "Rust Book");
+        assert_eq!(
+            results[0].get("title").unwrap().as_str().unwrap(),
+            "Rust Book"
+        );
     }
 
     #[tokio::test]
@@ -278,15 +298,19 @@ mod tests {
         let mock = MockSearchEngine::new()
             .with_result(
                 "rust programming",
-                vec![
-                    make_result("Rust Book", "https://rust-lang.org/book", "The Rust programming language"),
-                ],
+                vec![make_result(
+                    "Rust Book",
+                    "https://rust-lang.org/book",
+                    "The Rust programming language",
+                )],
             )
             .with_result(
                 "cargo tutorial",
-                vec![
-                    make_result("Cargo Guide", "https://doc.rust-lang.org/cargo", "Cargo documentation"),
-                ],
+                vec![make_result(
+                    "Cargo Guide",
+                    "https://doc.rust-lang.org/cargo",
+                    "Cargo documentation",
+                )],
             );
         let tool = SearchTool::new(Arc::new(mock));
 
@@ -302,14 +326,20 @@ mod tests {
         let mock = MockSearchEngine::new()
             .with_result(
                 "rust",
-                vec![
-                    make_result("Rust Book", "https://rust-lang.org/book", "The Rust programming language"),
-                ],
+                vec![make_result(
+                    "Rust Book",
+                    "https://rust-lang.org/book",
+                    "The Rust programming language",
+                )],
             )
             .with_result(
                 "rust lang",
                 vec![
-                    make_result("Rust Book Duplicate", "https://rust-lang.org/book", "Same URL different title"),
+                    make_result(
+                        "Rust Book Duplicate",
+                        "https://rust-lang.org/book",
+                        "Same URL different title",
+                    ),
                     make_result("Rust Blog", "https://blog.rust-lang.org", "The Rust blog"),
                 ],
             );
@@ -325,10 +355,22 @@ mod tests {
     #[tokio::test]
     async fn test_search_caps_at_3_queries() {
         let mock = MockSearchEngine::new()
-            .with_result("q1", vec![make_result("R1", "https://example.com/1", "Snippet 1")])
-            .with_result("q2", vec![make_result("R2", "https://example.com/2", "Snippet 2")])
-            .with_result("q3", vec![make_result("R3", "https://example.com/3", "Snippet 3")])
-            .with_result("q4", vec![make_result("R4", "https://example.com/4", "Snippet 4")]);
+            .with_result(
+                "q1",
+                vec![make_result("R1", "https://example.com/1", "Snippet 1")],
+            )
+            .with_result(
+                "q2",
+                vec![make_result("R2", "https://example.com/2", "Snippet 2")],
+            )
+            .with_result(
+                "q3",
+                vec![make_result("R3", "https://example.com/3", "Snippet 3")],
+            )
+            .with_result(
+                "q4",
+                vec![make_result("R4", "https://example.com/4", "Snippet 4")],
+            );
         let tool = SearchTool::new(Arc::new(mock));
 
         let input = json!({"queries": ["q1", "q2", "q3", "q4"]});
@@ -341,7 +383,13 @@ mod tests {
     #[tokio::test]
     async fn test_search_returns_max_10_results() {
         let many_results: Vec<SearchResult> = (0..15)
-            .map(|i| make_result(&format!("Title {}", i), &format!("https://example.com/{}", i), "Snippet"))
+            .map(|i| {
+                make_result(
+                    &format!("Title {}", i),
+                    &format!("https://example.com/{}", i),
+                    "Snippet",
+                )
+            })
             .collect();
 
         let mock = MockSearchEngine::new().with_result("many", many_results);
@@ -363,7 +411,10 @@ mod tests {
         let result = tool.execute(&input).await;
 
         assert!(result.is_err());
-        assert!(result.unwrap_err().to_string().contains("Missing 'query' or 'queries' field"));
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("Missing 'query' or 'queries' field"));
     }
 
     #[tokio::test]
@@ -375,7 +426,10 @@ mod tests {
         let result = tool.execute(&input).await;
 
         assert!(result.is_err());
-        assert!(result.unwrap_err().to_string().contains("No valid queries provided"));
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("No valid queries provided"));
     }
 
     #[tokio::test]
@@ -393,5 +447,3 @@ mod tests {
         assert_eq!(results.len(), 1);
     }
 }
-
-

@@ -16,7 +16,9 @@ pub fn render_command(frame: &mut Frame, area: Rect, app: &crate::app::App) {
     let focused = app.focus == Focus::Command;
 
     let prompt_style = if focused {
-        Style::default().fg(colors.accent).add_modifier(Modifier::BOLD)
+        Style::default()
+            .fg(colors.accent)
+            .add_modifier(Modifier::BOLD)
     } else {
         Style::default().fg(colors.dim)
     };
@@ -47,8 +49,5 @@ pub fn render_command(frame: &mut Frame, area: Rect, app: &crate::app::App) {
     let line = Line::from(spans);
 
     let bg = if focused { colors.header_bg } else { colors.bg };
-    frame.render_widget(
-        Paragraph::new(line).style(Style::default().bg(bg)),
-        area,
-    );
+    frame.render_widget(Paragraph::new(line).style(Style::default().bg(bg)), area);
 }

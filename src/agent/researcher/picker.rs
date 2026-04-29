@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use serde::Deserialize;
 
-use crate::llm::provider::{Message, Role, LlmProvider};
+use crate::llm::provider::{LlmProvider, Message, Role};
 
 /// Local representation of a search result suitable for picking.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -54,7 +54,11 @@ impl SearchResultPicker {
         ];
 
         // Ask the provider to stream a completion. We don't rely on a final token here.
-        let chunks = match self.provider.stream_completion(&messages, &self.model).await {
+        let chunks = match self
+            .provider
+            .stream_completion(&messages, &self.model)
+            .await
+        {
             Ok(ch) => ch,
             Err(_) => {
                 // If the provider fails, fall back to heuristic (top-3 by position).
@@ -118,7 +122,7 @@ pub type PickerResult = PickerSearchResult;
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::llm::provider::{Message, Role, ProviderError};
+    use crate::llm::provider::{Message, ProviderError, Role};
     use std::error::Error;
 
     struct MockProvider {
@@ -130,8 +134,14 @@ mod tests {
 
     #[async_trait]
     impl LlmProvider for MockProvider {
-        async fn stream_completion(&self, _messages: &[Message], _model: &str) -> Result<Vec<crate::llm::provider::Chunk>, ProviderError> {
-            Ok(vec![crate::llm::provider::Chunk { content: self.response.clone() }])
+        async fn stream_completion(
+            &self,
+            _messages: &[Message],
+            _model: &str,
+        ) -> Result<Vec<crate::llm::provider::Chunk>, ProviderError> {
+            Ok(vec![crate::llm::provider::Chunk {
+                content: self.response.clone(),
+            }])
         }
         async fn complete_with_tools(
             &self,
@@ -139,25 +149,53 @@ mod tests {
             _tools: &[crate::llm::provider::ToolDefinition],
             _model: &str,
         ) -> Result<crate::llm::provider::ToolResponse, ProviderError> {
-            Ok(crate::llm::provider::ToolResponse { content: None, tool_calls: vec![], finish_reason: crate::llm::provider::FinishReason::Stop, usage: None })
+            Ok(crate::llm::provider::ToolResponse {
+                content: None,
+                tool_calls: vec![],
+                finish_reason: crate::llm::provider::FinishReason::Stop,
+                usage: None,
+            })
         }
         fn name(&self) -> &str {
             &self.name
         }
-        fn is_authenticated(&self) -> bool { true }
-        async fn authenticate(&mut self, _api_key: &str) -> Result<(), ProviderError> { Ok(()) }
-        async fn deauthenticate(&mut self) -> Result<(), ProviderError> { Ok(()) }
-        async fn list_models(&self) -> Result<Vec<String>, ProviderError> { Ok(vec!["mock-model".to_string()]) }
+        fn is_authenticated(&self) -> bool {
+            true
+        }
+        async fn authenticate(&mut self, _api_key: &str) -> Result<(), ProviderError> {
+            Ok(())
+        }
+        async fn deauthenticate(&mut self) -> Result<(), ProviderError> {
+            Ok(())
+        }
+        async fn list_models(&self) -> Result<Vec<String>, ProviderError> {
+            Ok(vec!["mock-model".to_string()])
+        }
     }
 
     #[tokio::test]
     async fn picker_llm_parses_valid_json() {
         let results = vec![
-            PickerSearchResult { url: "https://a.example/1".into(), title: "Alpha".into(), snippet: "first result".into() },
-            PickerSearchResult { url: "https://b.example/2".into(), title: "Beta".into(), snippet: "second result".into() },
-            PickerSearchResult { url: "https://c.example/3".into(), title: "Gamma".into(), snippet: "third result".into() },
+            PickerSearchResult {
+                url: "https://a.example/1".into(),
+                title: "Alpha".into(),
+                snippet: "first result".into(),
+            },
+            PickerSearchResult {
+                url: "https://b.example/2".into(),
+                title: "Beta".into(),
+                snippet: "second result".into(),
+            },
+            PickerSearchResult {
+                url: "https://c.example/3".into(),
+                title: "Gamma".into(),
+                snippet: "third result".into(),
+            },
         ];
-        let mock = MockProvider { response: r#"{"picked_indices": [0,2]}"#.to_string(), name: "mock".to_string() };
+        let mock = MockProvider {
+            response: r#"{"picked_indices": [0,2]}"#.to_string(),
+            name: "mock".to_string(),
+        };
         let picker = SearchResultPicker::new(Arc::new(mock), "mock-model");
         let picked = picker.pick_best_urls(&results, "query").await;
         assert_eq!(picked.len(), 2);
@@ -168,12 +206,35 @@ mod tests {
     #[tokio::test]
     async fn picker_llm_invalid_json_falls_back() {
         let results = vec![
-            PickerSearchResult { url: "a".into(), title: "A".into(), snippet: "a".into() },
-            PickerSearchResult { url: "b".into(), title: "B".into(), snippet: "b".into() },
-            PickerSearchResult { url: "c".into(), title: "C".into(), snippet: "c".into() },
-            PickerSearchResult { url: "d".into(), title: "D".into(), snippet: "d".into() },
+            PickerSearchResult {
+                url: "a".into(),
+                title: "A".into(),
+                snippet: "a".into(),
+            },
+            PickerSearchResult {
+                url: "b".into(),
+                title: "B".into(),
+                snippet: "b".into(),
+            },
+            PickerSearchResult {
+                url: "c".into(),
+                title: "C".into(),
+                snippet: "c".into(),
+            },
+            PickerSearchResult {
+                url: "d".into(),
+                title: "D".into(),
+                snippet: "d".into(),
+            },
         ];
-        let mock = MockProvider { response: b"not json".to_vec().iter().map(|&b| b as char).collect::<String>() , name: "mock".to_string() };
+        let mock = MockProvider {
+            response: b"not json"
+                .to_vec()
+                .iter()
+                .map(|&b| b as char)
+                .collect::<String>(),
+            name: "mock".to_string(),
+        };
         // Build a picker
         let picker = SearchResultPicker::new(Arc::new(mock), "mock-model");
         let picked = picker.pick_best_urls(&results, "query").await;
@@ -187,10 +248,26 @@ mod tests {
     #[test]
     fn heuristic_picker_limits() {
         let results = vec![
-            PickerSearchResult { url: "1".into(), title: "t1".into(), snippet: "s1".into() },
-            PickerSearchResult { url: "2".into(), title: "t2".into(), snippet: "s2".into() },
-            PickerSearchResult { url: "3".into(), title: "t3".into(), snippet: "s3".into() },
-            PickerSearchResult { url: "4".into(), title: "t4".into(), snippet: "s4".into() },
+            PickerSearchResult {
+                url: "1".into(),
+                title: "t1".into(),
+                snippet: "s1".into(),
+            },
+            PickerSearchResult {
+                url: "2".into(),
+                title: "t2".into(),
+                snippet: "s2".into(),
+            },
+            PickerSearchResult {
+                url: "3".into(),
+                title: "t3".into(),
+                snippet: "s3".into(),
+            },
+            PickerSearchResult {
+                url: "4".into(),
+                title: "t4".into(),
+                snippet: "s4".into(),
+            },
         ];
         let picked = SearchResultPicker::pick_by_heuristic(&results);
         assert_eq!(picked.len(), 3);

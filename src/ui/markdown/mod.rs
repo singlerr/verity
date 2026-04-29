@@ -1,7 +1,10 @@
-use comrak::{Arena, ComrakOptions, parse_document, nodes::{AstNode, NodeValue}};
+use comrak::{
+    nodes::{AstNode, NodeValue},
+    parse_document, Arena, ComrakOptions,
+};
 use ratatui::text::{Line, Span};
-use unicode_width::UnicodeWidthStr;
 use std::collections::HashSet;
+use unicode_width::UnicodeWidthStr;
 
 pub(crate) fn leak(s: String) -> &'static str {
     Box::leak(s.into_boxed_str())
@@ -113,9 +116,7 @@ pub fn render_markdown(md: &str, width: u16) -> Vec<Line<'static>> {
                         let text = collect_text(child);
                         let inner_w = (width as usize).saturating_sub(4);
                         for l in wrap_text(&text, inner_w) {
-                            lines.push(Line::from(vec![
-                                Span::raw(leak(format!("  │ {}", l))),
-                            ]));
+                            lines.push(Line::from(vec![Span::raw(leak(format!("  │ {}", l)))]));
                         }
                     }
                 }
@@ -139,9 +140,10 @@ pub fn render_markdown(md: &str, width: u16) -> Vec<Line<'static>> {
                 let name = def.name.clone();
                 drop(b);
                 let text = collect_text(node);
-                lines.push(Line::from(vec![
-                    Span::raw(leak(format!("[^{}]: {}", name, text))),
-                ]));
+                lines.push(Line::from(vec![Span::raw(leak(format!(
+                    "[^{}]: {}",
+                    name, text
+                )))]));
                 for d in node.descendants() {
                     visited.insert(d as *const _ as usize);
                 }
@@ -159,5 +161,5 @@ pub fn render_markdown(md: &str, width: u16) -> Vec<Line<'static>> {
     lines
 }
 
-pub mod table;
 pub mod block;
+pub mod table;

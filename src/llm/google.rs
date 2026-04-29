@@ -3,7 +3,9 @@ use async_trait::async_trait;
 use reqwest::{Client, StatusCode};
 use serde::{Deserialize, Serialize};
 
-use crate::llm::provider::{Chunk, LlmProvider, Message, ProviderError, Role, ToolDefinition, ToolResponse};
+use crate::llm::provider::{
+    Chunk, LlmProvider, Message, ProviderError, Role, ToolDefinition, ToolResponse,
+};
 
 pub struct GoogleProvider {
     api_key: Option<String>,
@@ -66,11 +68,17 @@ impl GoogleProvider {
 
 #[async_trait]
 impl LlmProvider for GoogleProvider {
-    async fn stream_completion(&self, messages: &[Message], model: &str) -> Result<Vec<Chunk>, ProviderError> {
-        let api_key = self.api_key.as_ref()
-            .ok_or_else(|| Box::new(std::io::Error::new(
-                std::io::ErrorKind::InvalidInput, "No API key set"
-            )) as ProviderError)?;
+    async fn stream_completion(
+        &self,
+        messages: &[Message],
+        model: &str,
+    ) -> Result<Vec<Chunk>, ProviderError> {
+        let api_key = self.api_key.as_ref().ok_or_else(|| {
+            Box::new(std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                "No API key set",
+            )) as ProviderError
+        })?;
 
         let mut system_text = String::new();
         let mut contents: Vec<GeminiContent> = Vec::new();
@@ -78,19 +86,25 @@ impl LlmProvider for GoogleProvider {
         for msg in messages {
             match msg.role {
                 Role::System => {
-                    if !system_text.is_empty() { system_text.push('\n'); }
+                    if !system_text.is_empty() {
+                        system_text.push('\n');
+                    }
                     system_text.push_str(&msg.content);
                 }
                 Role::User => {
                     contents.push(GeminiContent {
                         role: "user".to_string(),
-                        parts: vec![GeminiPart { text: msg.content.clone() }],
+                        parts: vec![GeminiPart {
+                            text: msg.content.clone(),
+                        }],
                     });
                 }
                 Role::Assistant => {
                     contents.push(GeminiContent {
                         role: "model".to_string(),
-                        parts: vec![GeminiPart { text: msg.content.clone() }],
+                        parts: vec![GeminiPart {
+                            text: msg.content.clone(),
+                        }],
                     });
                 }
             }
@@ -112,7 +126,8 @@ impl LlmProvider for GoogleProvider {
             model, api_key
         );
 
-        let response = self.client
+        let response = self
+            .client
             .post(&url)
             .json(&request_body)
             .send()
@@ -123,32 +138,41 @@ impl LlmProvider for GoogleProvider {
             StatusCode::OK => {}
             StatusCode::UNAUTHORIZED | StatusCode::FORBIDDEN => {
                 return Err(Box::new(std::io::Error::new(
-                    std::io::ErrorKind::PermissionDenied, "Invalid or expired API key"
+                    std::io::ErrorKind::PermissionDenied,
+                    "Invalid or expired API key",
                 )));
             }
             status if status.as_u16() >= 400 && status.as_u16() < 500 => {
                 return Err(Box::new(std::io::Error::new(
-                    std::io::ErrorKind::InvalidInput, format!("Client error: {}", status)
+                    std::io::ErrorKind::InvalidInput,
+                    format!("Client error: {}", status),
                 )));
             }
             status if status.as_u16() >= 500 => {
                 return Err(Box::new(std::io::Error::new(
-                    std::io::ErrorKind::ConnectionAborted, format!("Server error: {}", status)
+                    std::io::ErrorKind::ConnectionAborted,
+                    format!("Server error: {}", status),
                 )));
             }
             _ => {}
         }
 
-        let body = response.text().await
+        let body = response
+            .text()
+            .await
             .map_err(|e| Box::new(e) as ProviderError)?;
 
         let mut chunks: Vec<Chunk> = Vec::new();
 
         for line in body.lines() {
             let line = line.trim();
-            if !line.starts_with("data: ") { continue; }
+            if !line.starts_with("data: ") {
+                continue;
+            }
             let json_str = &line[6..];
-            if json_str.is_empty() || json_str == "[DONE]" { continue; }
+            if json_str.is_empty() || json_str == "[DONE]" {
+                continue;
+            }
 
             match serde_json::from_str::<GeminiResponse>(json_str) {
                 Ok(response) => {
@@ -157,7 +181,9 @@ impl LlmProvider for GoogleProvider {
                             if let Some(content) = &first.content {
                                 if let Some(parts) = &content.parts {
                                     for part in parts {
-                                        chunks.push(Chunk { content: part.text.clone() });
+                                        chunks.push(Chunk {
+                                            content: part.text.clone(),
+                                        });
                                     }
                                 }
                             }
@@ -166,7 +192,8 @@ impl LlmProvider for GoogleProvider {
                 }
                 Err(e) => {
                     return Err(Box::new(std::io::Error::new(
-                        std::io::ErrorKind::InvalidData, format!("Failed to parse response: {}", e)
+                        std::io::ErrorKind::InvalidData,
+                        format!("Failed to parse response: {}", e),
                     )));
                 }
             }
@@ -175,10 +202,21 @@ impl LlmProvider for GoogleProvider {
         Ok(chunks)
     }
 
-    async fn complete_with_tools(&self, _messages: &[Message], _tools: &[ToolDefinition], _model: &str) -> Result<ToolResponse, ProviderError> { Err("Tool calling not supported by this provider".into()) }
+    async fn complete_with_tools(
+        &self,
+        _messages: &[Message],
+        _tools: &[ToolDefinition],
+        _model: &str,
+    ) -> Result<ToolResponse, ProviderError> {
+        Err("Tool calling not supported by this provider".into())
+    }
 
-    fn name(&self) -> &str { "google" }
-    fn is_authenticated(&self) -> bool { self.api_key.is_some() }
+    fn name(&self) -> &str {
+        "google"
+    }
+    fn is_authenticated(&self) -> bool {
+        self.api_key.is_some()
+    }
 
     async fn authenticate(&mut self, api_key: &str) -> Result<(), ProviderError> {
         self.api_key = Some(api_key.to_string());
