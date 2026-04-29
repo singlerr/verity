@@ -48,6 +48,9 @@ impl ProviderHandleAdapter {
     fn new(handle: ProviderHandle) -> Self {
         Self { handle, name_str: "provider".to_string() }
     }
+    fn new_with_name(handle: ProviderHandle, name: String) -> Self {
+        Self { handle, name_str: name }
+    }
 }
 
 #[async_trait]
@@ -75,6 +78,9 @@ impl LlmProvider for ProviderHandleAdapter {
     async fn list_models(&self) -> Result<Vec<String>, ProviderError> {
         let lock = self.handle.read().await;
         lock.list_models().await
+    }
+    fn supports_tool_calling(&self) -> bool {
+        self.name_str == "openai"
     }
 }
 
@@ -109,6 +115,7 @@ impl AgentOrchestrator {
 
         let depth = match classified.intent {
             QueryIntent::DirectAnswer => ResearchDepth::Speed,
+            _ if classified.quality => ResearchDepth::Quality,
             _ => ResearchDepth::Balanced,
         };
 
@@ -131,11 +138,19 @@ impl AgentOrchestrator {
             }
         }
         let provider: Arc<dyn LlmProvider> =
-            Arc::new(ProviderHandleAdapter::new(provider_handle));
+            Arc::new(ProviderHandleAdapter::new_with_name(provider_handle, provider_name.clone()));
+
+        // Check tool calling support for non-trivial research
+        if !classified.skip_search && !provider.supports_tool_calling() {
+            let _ = tx.send(AgentEvent::Error(
+                "Deep Research requires a model with tool calling support. Please select an OpenAI model (e.g., gpt-4o, gpt-4). You can use /model to change models.".into()
+            ));
+            return;
+        }
 
         // Phase 2: Research (skip if DirectAnswer)
         let output = if classified.skip_search {
-            ResearcherOutput { answer: String::new(), sources: Vec::new(), iterations_used: 0 }
+            ResearcherOutput { answer: String::new(), sources: Vec::new(), iterations_used: 0, extracted_facts: Vec::new() }
         } else {
             let researcher = ResearcherLoop::new(
                 provider.clone(), self.model.clone(), self.tools.clone(), cancel_token.clone(),
@@ -156,7 +171,7 @@ impl AgentOrchestrator {
 
         // Phase 3: Synthesize
         let synthesizer = ResearchSynthesizer::new(provider, &self.model);
-        let (final_text, final_sources) = match synthesizer.synthesize(query, &output.sources, depth).await {
+        let (final_text, final_sources) = match synthesizer.synthesize(query, &output.sources, depth, &output.extracted_facts).await {
             Ok(synth) => (synth.text, output.sources),
             Err(_) => (output.answer, output.sources), // fallback to researcher answer
         };
@@ -170,5 +185,35 @@ impl AgentOrchestrator {
         }
 
         let _ = tx.send(AgentEvent::Done(Answer { text: final_text, sources: final_sources }));
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::llm::provider::mock::MockLlmProvider;
+    use std::sync::Arc;
+    use tokio::sync::RwLock;
+
+    #[test]
+    fn provider_adapter_tool_calling_check() {
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        rt.block_on(async {
+            let mock = MockLlmProvider::new(vec![]);
+            let handle = Arc::new(RwLock::new(Box::new(mock) as Box<dyn LlmProvider + Send + Sync>));
+            let adapter = ProviderHandleAdapter::new_with_name(handle, "openai".to_string());
+            assert!(adapter.supports_tool_calling(), "openai provider should support tool calling");
+
+            let mock2 = MockLlmProvider::without_tool_calling();
+            let handle2 = Arc::new(RwLock::new(Box::new(mock2) as Box<dyn LlmProvider + Send + Sync>));
+            let adapter2 = ProviderHandleAdapter::new_with_name(handle2, "ollama".to_string());
+            assert!(!adapter2.supports_tool_calling(), "non-openai provider should not support tool calling");
+        });
+    }
+
+    #[test]
+    fn orchestrator_rejects_non_tool_calling_provider() {
+        let mock = MockLlmProvider::without_tool_calling();
+        assert!(!mock.supports_tool_calling(), "Mock without tool calling returns false");
     }
 }

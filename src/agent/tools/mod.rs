@@ -9,8 +9,9 @@ use crate::fs::read::read_file;
 use crate::search::{SearchEngine, SearchResult};
 use anyhow::{Context, Result};
 use async_trait::async_trait;
+use futures::future::join_all;
 use serde_json::{json, Value};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::Path;
 use std::sync::Arc;
 
@@ -39,15 +40,52 @@ impl Tool for SearchTool {
     }
 
     async fn execute(&self, input: &Value) -> Result<Value> {
-        let query = input
-            .get("query")
-            .and_then(|v| v.as_str())
-            .context("Missing 'query' field in input")?;
+        let max_queries = 3;
+        let queries: Vec<String> = if let Some(queries_array) = input.get("queries").and_then(|v| v.as_array()) {
+            queries_array
+                .iter()
+                .take(max_queries)
+                .filter_map(|v| v.as_str().map(String::from))
+                .filter(|s| !s.is_empty())
+                .collect()
+        } else if let Some(single_query) = input.get("query").and_then(|v| v.as_str()) {
+            vec![single_query.to_string()]
+        } else {
+            return Err(anyhow::anyhow!("Missing 'query' or 'queries' field in input"));
+        };
 
-        let results = self.search_engine.search(query).await?;
-        let formatted: Vec<Value> = results
+        if queries.is_empty() {
+            return Err(anyhow::anyhow!("No valid queries provided"));
+        }
+
+        let search_futures: Vec<_> = queries
+            .iter()
+            .map(|query| self.search_engine.search(query))
+            .collect();
+
+        let all_results = join_all(search_futures).await;
+
+        let mut seen_urls: HashSet<String> = HashSet::new();
+        let mut merged_results: Vec<SearchResult> = Vec::new();
+
+        for result_set in all_results {
+            match result_set {
+                Ok(results) => {
+                    for result in results {
+                        if seen_urls.insert(result.url.clone()) {
+                            merged_results.push(result);
+                        }
+                    }
+                }
+                Err(e) => {
+                    tracing::warn!("Search query failed: {}", e);
+                }
+            }
+        }
+
+        let formatted: Vec<Value> = merged_results
             .into_iter()
-            .take(5)
+            .take(10)
             .map(|r: SearchResult| {
                 json!({
                     "title": r.title,
@@ -174,6 +212,185 @@ impl ToolRegistry {
 impl Default for ToolRegistry {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::Mutex;
+
+    struct MockSearchEngine {
+        results: Mutex<HashMap<String, Vec<SearchResult>>>,
+    }
+
+    impl MockSearchEngine {
+        fn new() -> Self {
+            Self {
+                results: Mutex::new(HashMap::new()),
+            }
+        }
+
+        fn with_result(self, query: &str, results: Vec<SearchResult>) -> Self {
+            self.results.lock().unwrap().insert(query.to_string(), results);
+            self
+        }
+    }
+
+    #[async_trait]
+    impl SearchEngine for MockSearchEngine {
+        async fn search(&self, query: &str) -> Result<Vec<SearchResult>> {
+            let results = self.results.lock().unwrap();
+            Ok(results.get(query).cloned().unwrap_or_default())
+        }
+    }
+
+    fn make_result(title: &str, url: &str, snippet: &str) -> SearchResult {
+        SearchResult {
+            title: title.to_string(),
+            url: url.to_string(),
+            snippet: snippet.to_string(),
+            engine: "mock".to_string(),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_search_single_query() {
+        let mock = MockSearchEngine::new().with_result(
+            "rust programming",
+            vec![
+                make_result("Rust Book", "https://rust-lang.org/book", "The Rust programming language"),
+                make_result("Rust By Example", "https://rust-lang.org/examples", "Learn Rust by example"),
+            ],
+        );
+        let tool = SearchTool::new(Arc::new(mock));
+
+        let input = json!({"query": "rust programming"});
+        let result = tool.execute(&input).await.unwrap();
+
+        let results = result.get("results").unwrap().as_array().unwrap();
+        assert_eq!(results.len(), 2);
+        assert_eq!(results[0].get("title").unwrap().as_str().unwrap(), "Rust Book");
+    }
+
+    #[tokio::test]
+    async fn test_search_multiple_queries() {
+        let mock = MockSearchEngine::new()
+            .with_result(
+                "rust programming",
+                vec![
+                    make_result("Rust Book", "https://rust-lang.org/book", "The Rust programming language"),
+                ],
+            )
+            .with_result(
+                "cargo tutorial",
+                vec![
+                    make_result("Cargo Guide", "https://doc.rust-lang.org/cargo", "Cargo documentation"),
+                ],
+            );
+        let tool = SearchTool::new(Arc::new(mock));
+
+        let input = json!({"queries": ["rust programming", "cargo tutorial"]});
+        let result = tool.execute(&input).await.unwrap();
+
+        let results = result.get("results").unwrap().as_array().unwrap();
+        assert_eq!(results.len(), 2);
+    }
+
+    #[tokio::test]
+    async fn test_search_deduplicates_by_url() {
+        let mock = MockSearchEngine::new()
+            .with_result(
+                "rust",
+                vec![
+                    make_result("Rust Book", "https://rust-lang.org/book", "The Rust programming language"),
+                ],
+            )
+            .with_result(
+                "rust lang",
+                vec![
+                    make_result("Rust Book Duplicate", "https://rust-lang.org/book", "Same URL different title"),
+                    make_result("Rust Blog", "https://blog.rust-lang.org", "The Rust blog"),
+                ],
+            );
+        let tool = SearchTool::new(Arc::new(mock));
+
+        let input = json!({"queries": ["rust", "rust lang"]});
+        let result = tool.execute(&input).await.unwrap();
+
+        let results = result.get("results").unwrap().as_array().unwrap();
+        assert_eq!(results.len(), 2);
+    }
+
+    #[tokio::test]
+    async fn test_search_caps_at_3_queries() {
+        let mock = MockSearchEngine::new()
+            .with_result("q1", vec![make_result("R1", "https://example.com/1", "Snippet 1")])
+            .with_result("q2", vec![make_result("R2", "https://example.com/2", "Snippet 2")])
+            .with_result("q3", vec![make_result("R3", "https://example.com/3", "Snippet 3")])
+            .with_result("q4", vec![make_result("R4", "https://example.com/4", "Snippet 4")]);
+        let tool = SearchTool::new(Arc::new(mock));
+
+        let input = json!({"queries": ["q1", "q2", "q3", "q4"]});
+        let result = tool.execute(&input).await.unwrap();
+
+        let results = result.get("results").unwrap().as_array().unwrap();
+        assert_eq!(results.len(), 3);
+    }
+
+    #[tokio::test]
+    async fn test_search_returns_max_10_results() {
+        let many_results: Vec<SearchResult> = (0..15)
+            .map(|i| make_result(&format!("Title {}", i), &format!("https://example.com/{}", i), "Snippet"))
+            .collect();
+
+        let mock = MockSearchEngine::new().with_result("many", many_results);
+        let tool = SearchTool::new(Arc::new(mock));
+
+        let input = json!({"query": "many"});
+        let result = tool.execute(&input).await.unwrap();
+
+        let results = result.get("results").unwrap().as_array().unwrap();
+        assert_eq!(results.len(), 10);
+    }
+
+    #[tokio::test]
+    async fn test_search_missing_query_field() {
+        let mock = MockSearchEngine::new();
+        let tool = SearchTool::new(Arc::new(mock));
+
+        let input = json!({});
+        let result = tool.execute(&input).await;
+
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("Missing 'query' or 'queries' field"));
+    }
+
+    #[tokio::test]
+    async fn test_search_empty_queries_array() {
+        let mock = MockSearchEngine::new();
+        let tool = SearchTool::new(Arc::new(mock));
+
+        let input = json!({"queries": []});
+        let result = tool.execute(&input).await;
+
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("No valid queries provided"));
+    }
+
+    #[tokio::test]
+    async fn test_search_backward_compatibility() {
+        let mock = MockSearchEngine::new().with_result(
+            "test query",
+            vec![make_result("Result", "https://example.com", "Test snippet")],
+        );
+        let tool = SearchTool::new(Arc::new(mock));
+
+        let input = json!({"query": "test query"});
+        let result = tool.execute(&input).await.unwrap();
+
+        let results = result.get("results").unwrap().as_array().unwrap();
+        assert_eq!(results.len(), 1);
     }
 }
 

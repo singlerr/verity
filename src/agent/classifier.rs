@@ -39,6 +39,7 @@ pub struct ClassifiedIntent {
     pub reasoning: String,
     pub skip_search: bool,
     pub source_types: Vec<SourceType>,
+    pub quality: bool,
 }
 
 /// Intent classifier using a registered LLM provider
@@ -62,9 +63,11 @@ impl QueryClassifier {
 - local_analysis: Questions about local files, codebase, current project
 - mixed: Questions needing both local analysis AND web research
 
-Respond ONLY with JSON: {\"intent\":\"direct_answer|web_research|local_analysis|mixed\",\"search_queries\":[\"query1\",\"query2\"],\"reasoning\":\"brief explanation\",\"skip_search\":false,\"source_types\":[\"general\",\"news\",\"science\",\"it\"]}
+For web_research or mixed, you can also set \"quality\": true when the query requires deep, multi-angle research with comprehensive coverage (e.g., complex topics needing thorough investigation, comparisons, or detailed analysis).
 
-IMPORTANT: For web_research or mixed, provide 1-3 specific, reformulated search queries. NEVER copy the raw user query. Set skip_search to true only for direct_answer. Set source_types to filter SearXNG categories (general, news, science, it).";
+Respond ONLY with JSON: {\"intent\":\"direct_answer|web_research|local_analysis|mixed\",\"search_queries\":[\"query1\",\"query2\"],\"reasoning\":\"brief explanation\",\"skip_search\":false,\"source_types\":[\"general\",\"news\",\"science\",\"it\"],\"quality\":false}
+
+IMPORTANT: For web_research or mixed, provide 1-3 specific, reformulated search queries. NEVER copy the raw user query. Set skip_search to true only for direct_answer. Set source_types to filter SearXNG categories (general, news, science, it). Set quality to true for complex research-heavy queries needing deep coverage.";
         let system = Message {
             role: Role::System,
             content: system_prompt.to_string(),
@@ -105,6 +108,7 @@ IMPORTANT: For web_research or mixed, provide 1-3 specific, reformulated search 
                     reasoning: String,
                     skip_search: Option<bool>,
                     source_types: Option<Vec<SourceType>>,
+                    quality: Option<bool>,
                 }
                 if let Ok(resp) = serde_json::from_str::<ClassifierResponse>(&json_text) {
                     return ClassifiedIntent {
@@ -113,6 +117,7 @@ IMPORTANT: For web_research or mixed, provide 1-3 specific, reformulated search 
                         reasoning: resp.reasoning,
                         skip_search: resp.skip_search.unwrap_or(false),
                         source_types: resp.source_types.unwrap_or_else(|| vec![SourceType::General]),
+                        quality: resp.quality.unwrap_or(false),
                     };
                 } else {
                     return ClassifiedIntent {
@@ -121,6 +126,7 @@ IMPORTANT: For web_research or mixed, provide 1-3 specific, reformulated search 
                         reasoning: "classification fallback: web_research".to_string(),
                         skip_search: false,
                         source_types: vec![SourceType::General],
+                        quality: false,
                     };
                 }
             }
@@ -131,6 +137,7 @@ IMPORTANT: For web_research or mixed, provide 1-3 specific, reformulated search 
             reasoning: "classification fallback: web_research".to_string(),
             skip_search: false,
             source_types: vec![SourceType::General],
+            quality: false,
         }
     }
 }
@@ -155,9 +162,11 @@ mod tests {
             reasoning: "fallback".to_string(),
             skip_search: false,
             source_types: vec![SourceType::General],
+            quality: false,
         };
         assert!(!fallback.skip_search);
         assert_eq!(fallback.source_types, vec![SourceType::General]);
+        assert!(!fallback.quality);
     }
 
     #[test]

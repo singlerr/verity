@@ -3,6 +3,7 @@
 pub mod context;
 pub mod prompt;
 pub mod loop_module;
+pub mod picker;
 
 use crate::llm::provider::ToolCall;
 
@@ -51,9 +52,59 @@ impl ResearchDepth {
     }
 }
 
+/// Provider action for mode-specific pipeline behavior.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ProviderAction {
+    /// Provider only performs web search, no scraping or extraction.
+    SearchOnly,
+    /// Provider performs web search and scraping, no fact extraction.
+    SearchAndScrape,
+    /// Provider performs full pipeline: search, scrape, and fact extraction.
+    SearchPickScrapeExtract,
+}
+
+/// A single extracted fact from scraped content.
+#[derive(Debug, Clone)]
+pub struct ExtractedFact {
+    /// The factual content extracted.
+    pub content: String,
+    /// URL from which this fact was extracted.
+    pub source_url: String,
+    /// Title of the source page.
+    pub source_title: String,
+}
+
+/// Researcher-specific search result with relevance scoring.
+/// Distinct from `search::SearchResult` in the search module.
+#[derive(Debug, Clone)]
+pub struct ResearcherSearchResult {
+    /// URL of the search result.
+    pub url: String,
+    /// Title of the search result.
+    pub title: String,
+    /// Snippet/summary of the search result.
+    pub snippet: String,
+    /// Relevance score (0.0 to 1.0).
+    pub relevance_score: f32,
+}
+
+/// Scraped content with extracted facts.
+#[derive(Debug, Clone)]
+pub struct ScrapedContent {
+    /// URL that was scraped.
+    pub url: String,
+    /// Title of the scraped page.
+    pub title: String,
+    /// Raw text content from the page.
+    pub raw_text: String,
+    /// Facts extracted from the content.
+    pub extracted_facts: Vec<ExtractedFact>,
+}
+
 // Re-exports
 pub use context::ResearcherContext;
 pub use loop_module::{ResearcherLoop, ResearcherOutput};
+pub use self::{ExtractedFact, ProviderAction, ResearcherSearchResult, ScrapedContent};
 
 #[cfg(test)]
 mod tests {
@@ -104,4 +155,56 @@ mod tests {
             output: "results".into(),
         };
     }
+
+    #[test]
+    fn extracted_fact_construction() {
+        let fact = ExtractedFact {
+            content: "Rust 1.70 was released in 2023".into(),
+            source_url: "https://blog.rust-lang.org/2023/06/01/Rust-1.70.0.html".into(),
+            source_title: "Rust 1.70.0".into(),
+        };
+        assert_eq!(fact.content, "Rust 1.70 was released in 2023");
+        assert!(fact.source_url.contains("rust-lang.org"));
+        assert_eq!(fact.source_title, "Rust 1.70.0");
+    }
+
+    #[test]
+    fn researcher_search_result_construction() {
+        let result = ResearcherSearchResult {
+            url: "https://example.com/article".into(),
+            title: "Example Article".into(),
+            snippet: "This is a sample snippet.".into(),
+            relevance_score: 0.85,
+        };
+        assert_eq!(result.url, "https://example.com/article");
+        assert_eq!(result.title, "Example Article");
+        assert_eq!(result.relevance_score, 0.85);
+    }
+
+    #[test]
+    fn scraped_content_construction() {
+        let fact = ExtractedFact {
+            content: "Fact content".into(),
+            source_url: "https://example.com".into(),
+            source_title: "Example".into(),
+        };
+        let scraped = ScrapedContent {
+            url: "https://example.com".into(),
+            title: "Example Page".into(),
+            raw_text: "Full article text here...".into(),
+            extracted_facts: vec![fact],
+        };
+        assert_eq!(scraped.url, "https://example.com");
+        assert!(scraped.raw_text.contains("Full article"));
+        assert_eq!(scraped.extracted_facts.len(), 1);
+    }
+
+    #[test]
+    fn provider_action_variants() {
+        assert_eq!(ProviderAction::SearchOnly, ProviderAction::SearchOnly);
+        assert_eq!(ProviderAction::SearchAndScrape, ProviderAction::SearchAndScrape);
+        assert_eq!(ProviderAction::SearchPickScrapeExtract, ProviderAction::SearchPickScrapeExtract);
+    }
 }
+pub mod extractor;
+pub use extractor::ContentExtractor;

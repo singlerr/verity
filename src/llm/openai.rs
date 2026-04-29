@@ -193,6 +193,8 @@ impl LlmProvider for OpenAiProvider {
         let body: ModelsResponse = response.json().await.map_err(|e| format!("Parse error: {}", e))?;
         Ok(body.data.into_iter().map(|m| m.id).collect())
     }
+
+    fn supports_tool_calling(&self) -> bool { true }
 }
 
 impl Default for OpenAiProvider {

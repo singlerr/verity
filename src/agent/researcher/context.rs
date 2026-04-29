@@ -68,15 +68,26 @@ impl ResearcherContext {
     /// to bring the context back within budget.
     /// NEVER removes the first message (system prompt) at index 0.
     pub fn truncate_oldest(&mut self) {
+        self.truncate_oldest_with_priority();
+    }
+
+    /// Truncate with priority: preserves reasoning preambles.
+    /// Phase 1: remove oldest ToolResult messages (except __reasoning_preamble)
+    /// Phase 2: remove oldest User/Assistant pairs if still over budget
+    pub fn truncate_oldest_with_priority(&mut self) {
         if self.messages.len() <= 1 {
             return;
         }
 
-        // Phase 1: remove oldest tool results first
+        // Phase 1: remove oldest tool results first, but skip reasoning preambles
         let mut i = 1;
         while i < self.messages.len() && self.is_over_budget() {
-            if matches!(self.messages[i], ResearcherMessage::ToolResult { .. }) {
-                self.messages.remove(i);
+            if let ResearcherMessage::ToolResult { name, .. } = &self.messages[i] {
+                if name != "__reasoning_preamble" {
+                    self.messages.remove(i);
+                } else {
+                    i += 1;
+                }
             } else {
                 i += 1;
             }
@@ -188,5 +199,47 @@ mod tests {
         let ctx = ResearcherContext::with_budget(500);
         assert_eq!(ctx.token_estimate(), 0);
         assert!(!ctx.is_over_budget());
+    }
+
+    #[test]
+    fn truncate_preserves_reasoning_preamble() {
+        let mut ctx = ResearcherContext::with_budget(300);
+        ctx.push_message(ResearcherMessage::System { content: "You are helpful.".into() });
+
+        for i in 0..3 {
+            ctx.push_message(ResearcherMessage::ToolResult {
+                call_id: format!("rp{}", i),
+                name: "__reasoning_preamble".into(),
+                output: format!("reasoning step {}", i),
+            });
+        }
+
+        for i in 0..10 {
+            ctx.push_message(ResearcherMessage::User { content: "x".repeat(100) });
+            ctx.push_message(ResearcherMessage::ToolResult {
+                call_id: format!("c{}", i),
+                name: "search".into(),
+                output: "y".repeat(100),
+            });
+        }
+
+        assert!(ctx.is_over_budget());
+
+        let reasoning_before = ctx.messages.iter().filter(|m| {
+            matches!(m, ResearcherMessage::ToolResult { name, .. } if name == "__reasoning_preamble")
+        }).count();
+        assert_eq!(reasoning_before, 3);
+
+        ctx.truncate_oldest_with_priority();
+
+        assert!(matches!(
+            ctx.messages.first(),
+            Some(ResearcherMessage::System { .. })
+        ));
+
+        let reasoning_after = ctx.messages.iter().filter(|m| {
+            matches!(m, ResearcherMessage::ToolResult { name, .. } if name == "__reasoning_preamble")
+        }).count();
+        assert_eq!(reasoning_after, 3, "All reasoning preambles should be preserved");
     }
 }
