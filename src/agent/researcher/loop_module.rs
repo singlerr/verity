@@ -10,7 +10,7 @@ use crate::app::Source;
 use crate::agent::orchestrator::AgentEvent;
 use crate::agent::tools::ToolRegistry;
 use crate::llm::provider::{FinishReason, LlmProvider, Message, Role, ToolCall, ToolDefinition};
-use super::{ExtractedFact, ProviderAction, ResearchDepth, ResearcherContext, ResearcherMessage, ResearcherSearchResult, ScrapedContent};
+use super::{ExtractedFact, ResearchDepth, ResearcherContext, ResearcherMessage};
 use crate::agent::researcher::ContentExtractor;
 use crate::agent::researcher::prompt;
 
@@ -174,7 +174,7 @@ impl ResearcherLoop {
                 }
             }
             // Progress indicator
-            let _ = tx.send(AgentEvent::StepProgress((i + 1), format!("Iteration {} complete", i + 1)));
+            let _ = tx.send(AgentEvent::StepProgress(i + 1, format!("Iteration {} complete", i + 1)));
         }
         if answer.is_empty() { answer = "Research completed without a final summary.".into(); }
         Ok(ResearcherOutput { answer, sources, iterations_used: max_iters, extracted_facts })
@@ -241,7 +241,7 @@ impl ResearcherLoop {
                 }
             }
             // Emit progress
-            let _ = tx.send(AgentEvent::StepProgress((i + 1), String::from("progress")));
+            let _ = tx.send(AgentEvent::StepProgress(i + 1, String::from("progress")));
         }
         if answer.is_empty() { answer = "Research completed without a final summary.".into(); }
         Ok(ResearcherOutput { answer, sources, iterations_used: max_iters, extracted_facts })

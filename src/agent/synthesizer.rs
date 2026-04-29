@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use crate::app::Source;
 use crate::agent::researcher::{ResearchDepth, ExtractedFact};
 use crate::llm::provider::{LlmProvider, Message, Role};

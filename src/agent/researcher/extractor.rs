@@ -3,7 +3,7 @@ use std::collections::HashSet;
 
 use serde::Deserialize;
 
-use crate::llm::provider::{LlmProvider, Message, Role, Chunk};
+use crate::llm::provider::{LlmProvider, Message, Role};
 use crate::agent::researcher::ExtractedFact;
 
 // Public extractor interface for use by Task 6 and beyond

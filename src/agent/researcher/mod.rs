@@ -104,7 +104,6 @@ pub struct ScrapedContent {
 // Re-exports
 pub use context::ResearcherContext;
 pub use loop_module::{ResearcherLoop, ResearcherOutput};
-pub use self::{ExtractedFact, ProviderAction, ResearcherSearchResult, ScrapedContent};
 
 #[cfg(test)]
 mod tests {
