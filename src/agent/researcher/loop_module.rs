@@ -127,8 +127,8 @@ impl ResearcherLoop {
             let top_n = std::cmp::min(3, sources.len());
             if top_n > 0 {
                 if let Some(read_url) = self.tool_registry.get("read_url") {
-                    for idx in 0..top_n {
-                        let url = sources[idx].url.clone();
+                    for source in sources.iter().take(top_n) {
+                        let url = source.url.clone();
                         let val = read_url
                             .execute(&serde_json::json!({"url": url}))
                             .await
@@ -345,7 +345,7 @@ impl ResearcherLoop {
 
     /// Simple helper to pick top 3 results from the current sources by their order.
     fn select_top_results(sources: &[Source]) -> Vec<Source> {
-        sources.iter().cloned().take(3).collect()
+        sources.iter().take(3).cloned().collect()
     }
 
     /// Check if any tool call in the list is a reasoning preamble.
