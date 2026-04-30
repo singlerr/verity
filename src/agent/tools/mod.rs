@@ -25,11 +25,27 @@ pub trait Tool: Send + Sync {
 /// Search tool using a SearchEngine implementation.
 pub struct SearchTool {
     search_engine: Arc<dyn SearchEngine>,
+    categories: Vec<String>,
 }
 
 impl SearchTool {
     pub fn new(search_engine: Arc<dyn SearchEngine>) -> Self {
-        Self { search_engine }
+        Self {
+            search_engine,
+            categories: vec!["general".to_string()],
+        }
+    }
+
+    pub fn with_categories(search_engine: Arc<dyn SearchEngine>, categories: Vec<String>) -> Self {
+        let cats = if categories.is_empty() {
+            vec!["general".to_string()]
+        } else {
+            categories
+        };
+        Self {
+            search_engine,
+            categories: cats,
+        }
     }
 }
 
@@ -61,17 +77,29 @@ impl Tool for SearchTool {
             return Err(anyhow::anyhow!("No valid queries provided"));
         }
 
+        // Prefer categories from input args, fall back to self.categories
+        let cats: Vec<&str> = if let Some(cats_arr) = input.get("categories").and_then(|v| v.as_array()) {
+            cats_arr
+                .iter()
+                .filter_map(|v| v.as_str())
+                .collect()
+        } else {
+            self.categories.iter().map(|s| s.as_str()).collect()
+        };
+        let cats_ref: &[&str] = if cats.is_empty() { &["general"] } else { &cats };
+
         let search_futures: Vec<_> = queries
             .iter()
-            .map(|query| self.search_engine.search(query, &["general"]))
+            .map(|query| self.search_engine.search(query, cats_ref))
             .collect();
 
         let all_results = join_all(search_futures).await;
 
         let mut seen_urls: HashSet<String> = HashSet::new();
         let mut merged_results: Vec<SearchResult> = Vec::new();
+        let mut error_messages: Vec<String> = Vec::new();
 
-        for result_set in all_results {
+        for (idx, result_set) in all_results.into_iter().enumerate() {
             match result_set {
                 Ok(results) => {
                     for result in results {
@@ -82,8 +110,19 @@ impl Tool for SearchTool {
                 }
                 Err(e) => {
                     tracing::warn!("Search query failed: {}", e);
+                    let query = queries.get(idx).map(|s| s.as_str()).unwrap_or("unknown");
+                    error_messages.push(format!("Search query '{}' failed: {}", query, e));
                 }
             }
+        }
+
+        for msg in error_messages {
+            merged_results.push(SearchResult {
+                title: "Search Error".to_string(),
+                url: String::new(),
+                snippet: msg,
+                engine: "system".to_string(),
+            });
         }
 
         let formatted: Vec<Value> = merged_results

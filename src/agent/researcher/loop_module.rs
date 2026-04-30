@@ -32,6 +32,7 @@ pub struct ResearcherLoop {
     tool_defs: Vec<ToolDefinition>,
     tool_registry: ToolRegistry,
     cancel_token: CancellationToken,
+    categories: Vec<String>,
 }
 
 impl ResearcherLoop {
@@ -40,14 +41,21 @@ impl ResearcherLoop {
         model: String,
         tool_registry: ToolRegistry,
         cancel_token: CancellationToken,
+        categories: Vec<String>,
     ) -> Self {
         let tool_defs = prompt::get_tool_definitions();
+        let cats = if categories.is_empty() {
+            vec!["general".to_string()]
+        } else {
+            categories
+        };
         Self {
             provider,
             model,
             tool_defs,
             tool_registry,
             cancel_token,
+            categories: cats,
         }
     }
 
@@ -367,18 +375,27 @@ impl ResearcherLoop {
         let args: serde_json::Value = serde_json::from_str(&tc.arguments).unwrap_or_default();
         match tc.name.as_str() {
             "web_search" => {
-                let query = args
-                    .get("query")
-                    .and_then(|q| q.as_str())
-                    .unwrap_or("")
-                    .to_string();
+                let queries_display: String = if let Some(arr) = args.get("queries").and_then(|v| v.as_array()) {
+                    arr.iter().filter_map(|v| v.as_str()).next().unwrap_or("").to_string()
+                } else {
+                    args.get("query").and_then(|q| q.as_str()).unwrap_or("").to_string()
+                };
+                let mut enriched_args = args.clone();
+                if !self.categories.is_empty() {
+                    if let Some(obj) = enriched_args.as_object_mut() {
+                        obj.insert(
+                            "categories".to_string(),
+                            serde_json::Value::Array(self.categories.iter().map(|c| serde_json::Value::String(c.clone())).collect()),
+                        );
+                    }
+                }
                 let _ = tx.send(AgentEvent::SearchingIteration {
                     current: (iteration + 1) as u8,
                     max: max_iters as u8,
-                    query: query.clone(),
+                    query: queries_display.clone(),
                 });
                 match self.tool_registry.get("search") {
-                    Some(tool) => match tool.execute(&args).await {
+                    Some(tool) => match tool.execute(&enriched_args).await {
                         Ok(val) => {
                             if let Some(results) = val.get("results").and_then(|r| r.as_array()) {
                                 for item in results.iter() {
@@ -680,7 +697,7 @@ mod tests {
         let cancel = CancellationToken::new();
         let registry = ToolRegistry::new();
         let provider: Arc<dyn LlmProvider> = Arc::new(crate::llm::openai::OpenAiProvider::new());
-        let _rl = ResearcherLoop::new(provider, "gpt-4".into(), registry, cancel);
+        let _rl = ResearcherLoop::new(provider, "gpt-4".into(), registry, cancel, vec!["general".to_string()]);
     }
 
     #[test]
@@ -759,7 +776,7 @@ mod tests {
         let mock = MockLlmProvider::new(responses);
 
         let provider: Arc<dyn LlmProvider> = Arc::new(mock);
-        let _loop_ref = ResearcherLoop::new(provider, "gpt-4".into(), registry, cancel);
+        let _loop_ref = ResearcherLoop::new(provider, "gpt-4".into(), registry, cancel, vec!["general".to_string()]);
 
         assert_eq!(
             ResearcherLoop::min_iterations_for_depth(ResearchDepth::Speed),

@@ -205,11 +205,17 @@ impl AgentOrchestrator {
                 extracted_facts: Vec::new(),
             }
         } else {
+            let categories: Vec<String> = if classified.source_types.is_empty() {
+                vec!["general".to_string()]
+            } else {
+                classified.source_types.iter().map(|st| st.as_searxng_category().to_string()).collect()
+            };
             let researcher = ResearcherLoop::new(
                 provider.clone(),
                 self.model.clone(),
                 self.tools.clone(),
                 cancel_token.clone(),
+                categories,
             );
             match researcher.run(query, depth, &tx).await {
                 Ok(out) => out,
