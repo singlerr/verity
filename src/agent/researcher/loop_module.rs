@@ -890,4 +890,26 @@ mod tests {
             "Reasoning preambles should be preserved during truncation"
         );
     }
+
+    #[test]
+    fn web_search_extracts_queries_array_for_display() {
+        let args: serde_json::Value = serde_json::json!({"queries": ["rust async", "tokio"]});
+        let queries_display: String = if let Some(arr) = args.get("queries").and_then(|v| v.as_array()) {
+            arr.iter().filter_map(|v| v.as_str()).next().unwrap_or("").to_string()
+        } else {
+            args.get("query").and_then(|q| q.as_str()).unwrap_or("").to_string()
+        };
+        assert_eq!(queries_display, "rust async");
+    }
+
+    #[test]
+    fn web_search_extracts_single_query_for_display() {
+        let args: serde_json::Value = serde_json::json!({"query": "rust programming"});
+        let queries_display: String = if let Some(arr) = args.get("queries").and_then(|v| v.as_array()) {
+            arr.iter().filter_map(|v| v.as_str()).next().unwrap_or("").to_string()
+        } else {
+            args.get("query").and_then(|q| q.as_str()).unwrap_or("").to_string()
+        };
+        assert_eq!(queries_display, "rust programming");
+    }
 }

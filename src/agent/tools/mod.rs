@@ -545,4 +545,103 @@ mod tests {
 
         drop(tmpdir);
     }
+
+    #[tokio::test]
+    async fn test_search_error_propagation() {
+        struct FailingSearchEngine;
+        #[async_trait]
+        impl SearchEngine for FailingSearchEngine {
+            async fn search(&self, _query: &str, _categories: &[&str]) -> Result<Vec<SearchResult>> {
+                anyhow::bail!("connection refused")
+            }
+        }
+        let tool = SearchTool::new(Arc::new(FailingSearchEngine));
+        let input = json!({"query": "test"});
+        let result = tool.execute(&input).await.unwrap();
+        let results = result.get("results").unwrap().as_array().unwrap();
+        assert!(!results.is_empty());
+        let error_result = &results[0];
+        assert_eq!(error_result.get("title").unwrap().as_str().unwrap(), "Search Error");
+        assert!(error_result.get("snippet").unwrap().as_str().unwrap().contains("connection refused"));
+    }
+
+    #[tokio::test]
+    async fn test_search_with_categories_constructor() {
+        struct CategoryRecordingEngine {
+            categories: Mutex<Vec<String>>,
+            results: Mutex<HashMap<String, Vec<SearchResult>>>,
+        }
+        impl CategoryRecordingEngine {
+            fn new() -> Self {
+                Self {
+                    categories: Mutex::new(Vec::new()),
+                    results: Mutex::new(HashMap::new()),
+                }
+            }
+            fn with_result(self, query: &str, results: Vec<SearchResult>) -> Self {
+                self.results.lock().unwrap().insert(query.to_string(), results);
+                self
+            }
+        }
+        #[async_trait]
+        impl SearchEngine for CategoryRecordingEngine {
+            async fn search(&self, query: &str, categories: &[&str]) -> Result<Vec<SearchResult>> {
+                let mut cats = self.categories.lock().unwrap();
+                cats.clear();
+                cats.extend(categories.iter().map(|&s| s.to_string()));
+                let results = self.results.lock().unwrap();
+                Ok(results.get(query).cloned().unwrap_or_default())
+            }
+        }
+
+        let mock = CategoryRecordingEngine::new()
+            .with_result("test query", vec![make_result("Result", "https://example.com", "Test snippet")]);
+        let tool = SearchTool::with_categories(Arc::new(mock), vec!["news".to_string()]);
+
+        let input = json!({"query": "test query"});
+        let _result = tool.execute(&input).await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn test_search_categories_from_input_override() {
+        struct CategoryRecordingEngine {
+            categories: Mutex<Vec<String>>,
+            results: Mutex<HashMap<String, Vec<SearchResult>>>,
+        }
+        impl CategoryRecordingEngine {
+            fn new() -> Self {
+                Self {
+                    categories: Mutex::new(Vec::new()),
+                    results: Mutex::new(HashMap::new()),
+                }
+            }
+            fn with_result(self, query: &str, results: Vec<SearchResult>) -> Self {
+                self.results.lock().unwrap().insert(query.to_string(), results);
+                self
+            }
+            fn get_categories(&self) -> Vec<String> {
+                self.categories.lock().unwrap().clone()
+            }
+        }
+        #[async_trait]
+        impl SearchEngine for CategoryRecordingEngine {
+            async fn search(&self, query: &str, categories: &[&str]) -> Result<Vec<SearchResult>> {
+                let mut cats = self.categories.lock().unwrap();
+                cats.clear();
+                cats.extend(categories.iter().map(|&s| s.to_string()));
+                let results = self.results.lock().unwrap();
+                Ok(results.get(query).cloned().unwrap_or_default())
+            }
+        }
+
+        let mock = Arc::new(CategoryRecordingEngine::new()
+            .with_result("test query", vec![make_result("Result", "https://example.com", "Test snippet")]));
+        let tool = SearchTool::with_categories(mock.clone(), vec!["general".to_string()]);
+
+        let input = json!({"query": "test query", "categories": ["news"]});
+        let _result = tool.execute(&input).await.unwrap();
+
+        let received_categories = mock.get_categories();
+        assert_eq!(received_categories, vec!["news"]);
+    }
 }
