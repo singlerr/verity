@@ -63,7 +63,7 @@ impl Tool for SearchTool {
 
         let search_futures: Vec<_> = queries
             .iter()
-            .map(|query| self.search_engine.search(query))
+            .map(|query| self.search_engine.search(query, &["general"]))
             .collect();
 
         let all_results = join_all(search_futures).await;
@@ -259,7 +259,7 @@ mod tests {
 
     #[async_trait]
     impl SearchEngine for MockSearchEngine {
-        async fn search(&self, query: &str) -> Result<Vec<SearchResult>> {
+        async fn search(&self, query: &str, _categories: &[&str]) -> Result<Vec<SearchResult>> {
             let results = self.results.lock().unwrap();
             Ok(results.get(query).cloned().unwrap_or_default())
         }

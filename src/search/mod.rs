@@ -21,7 +21,8 @@ pub struct SearchResult {
 #[async_trait::async_trait]
 pub trait SearchEngine: Send + Sync {
     /// Perform a search query and return results.
-    async fn search(&self, query: &str) -> Result<Vec<SearchResult>>;
+    /// categories defaults to &["general"] if empty
+    async fn search(&self, query: &str, categories: &[&str]) -> Result<Vec<SearchResult>>;
 }
 
 pub use searxng::SearXngClient;
