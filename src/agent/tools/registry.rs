@@ -5,7 +5,8 @@ use std::sync::Arc;
 use crate::search::{SearXngClient, SearchEngine};
 
 use super::{
-    ListDirTool, ReadFileTool, ReadUrlTool, SearchTool, ShellTool, ToolRegistry, WriteFileTool,
+    EditFileTool, GlobTool, GrepTool, ListDirTool, ReadFileTool, ReadUrlTool, SearchTool,
+    ShellTool, ToolRegistry, WriteFileTool,
 };
 use crate::fs::FileTree;
 
@@ -17,8 +18,11 @@ pub fn build_tool_registry(searxng_url: &str) -> ToolRegistry {
     registry.register(ReadUrlTool::new());
     registry.register(ReadFileTool::new());
     registry.register(WriteFileTool::new());
+    registry.register(EditFileTool::new());
     registry.register(ListDirTool::new());
     registry.register(ShellTool::new());
+    registry.register(GrepTool::new());
+    registry.register(GlobTool::new());
     registry
 }
 
@@ -29,13 +33,15 @@ pub fn tool_manifest() -> String {
         .unwrap_or_else(|_| ".".to_string());
     format!(
         "Current working directory: {cwd}\n\n\
-         Available tools:\n\
-         - search(query) — search the web\n\
-         - read_url(url) — fetch and read a web page\n\
-         - read_file(path, range?) — read a local file; range is optional [start_line, end_line]\n\
-         - write_file(path, content) — write or overwrite a local file\n\
-         - list_dir(path?) — list directory tree; defaults to current directory\n\
-         - shell(command) — run a shell command in the current directory",
+         Available tools:\
+         - search(query) — search the web
+         - read_url(url) — fetch and read a web page
+         - read_file(path, range?) — read a local file; range is optional [start_line, end_line]
+         - write_file(path, content) — write or overwrite a local file
+         - edit_file(path, old_string, new_string, replace_all?) — edit a local file by replacing old_string with new_string; replace_all defaults to false
+         - list_dir(path?) — list directory tree; defaults to current directory
+         - shell(command) — run a shell command in the current directory
+         - grep(pattern, path?) — search file contents for pattern; defaults to current directory",
         cwd = cwd
     )
 }
@@ -72,18 +78,36 @@ impl Default for ShellTool {
     }
 }
 
+impl Default for EditFileTool {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl Default for GrepTool {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 // Helper for ListDirTool
 
-fn format_tree(tree: &FileTree, depth: usize) -> String {
+fn format_tree(tree: &FileTree, depth: usize, max_depth: usize) -> String {
     let indent = "  ".repeat(depth);
     let marker = if tree.is_dir { "[dir] " } else { "" };
     let mut out = format!("{}{}{}\n", indent, marker, tree.name);
-    for child in &tree.children {
-        out.push_str(&format_tree(child, depth + 1));
+    if depth >= max_depth - 1 {
+        if !tree.children.is_empty() {
+            out.push_str(&format!("{}  [{} items not shown]\n", indent, tree.children.len()));
+        }
+    } else {
+        for child in &tree.children {
+            out.push_str(&format_tree(child, depth + 1, max_depth));
+        }
     }
     out
 }
 
-pub(crate) fn format_dir_tree(tree: &FileTree, depth: usize) -> String {
-    format_tree(tree, depth)
+pub(crate) fn format_dir_tree(tree: &FileTree, depth: usize, max_depth: usize) -> String {
+    format_tree(tree, depth, max_depth)
 }

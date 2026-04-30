@@ -2,7 +2,7 @@
 
 pub mod local;
 pub mod registry;
-pub use local::{ListDirTool, ShellTool, WriteFileTool};
+pub use local::{sandbox_path, EditFileTool, GlobTool, GrepTool, ListDirTool, ShellTool, WriteFileTool};
 pub use registry::{build_tool_registry, tool_manifest};
 
 use crate::fs::read::read_file;
@@ -174,7 +174,7 @@ impl Tool for ReadFileTool {
             .and_then(|v| v.as_str())
             .context("Missing 'path' field in input")?;
 
-        let path = Path::new(path_str);
+        let safe_path = local::sandbox_path(Path::new(path_str))?;
         let range = input.get("range").and_then(|v| {
             v.as_array().and_then(|arr| {
                 if arr.len() == 2 {
@@ -187,8 +187,19 @@ impl Tool for ReadFileTool {
             })
         });
 
-        let content = read_file(path, range)?;
-        Ok(json!({"content": content}))
+        let content = read_file(&safe_path, range)?;
+
+        // Truncate at 10K chars
+        const MAX_CHARS: usize = 10_000;
+        let output = if content.len() > MAX_CHARS {
+            let total_lines = content.lines().count();
+            let truncated: String = content.chars().take(MAX_CHARS).collect();
+            format!("{}\n\n[truncated: {} total lines. Use range parameter to read specific sections.]", truncated, total_lines)
+        } else {
+            content
+        };
+
+        Ok(json!({"content": output}))
     }
 }
 
@@ -445,5 +456,54 @@ mod tests {
 
         let results = result.get("results").unwrap().as_array().unwrap();
         assert_eq!(results.len(), 1);
+    }
+
+    #[test]
+    fn sandbox_allows_nested_creation() {
+        let cwd = std::env::current_dir().unwrap();
+        let tmpdir = tempfile::tempdir_in(&cwd).unwrap();
+        let nested = tmpdir.path().join("sub").join("new_file.txt");
+        std::fs::create_dir(tmpdir.path().join("sub")).unwrap();
+        let result = local::sandbox_path(&nested);
+        assert!(result.is_ok(), "Creating new files in existing CWD subdirectories should be allowed");
+
+        drop(tmpdir);
+    }
+
+    #[tokio::test]
+    async fn read_file_truncates_large_output() {
+        let cwd = std::env::current_dir().unwrap();
+        let tmpdir = tempfile::tempdir_in(&cwd).unwrap();
+        let test_file = tmpdir.path().join("large.txt");
+        let large_content: String = "x".repeat(15_000);
+        std::fs::write(&test_file, &large_content).unwrap();
+
+        let tool = ReadFileTool::new();
+        let input = json!({"path": test_file.to_str().unwrap()});
+        let result = tool.execute(&input).await.unwrap();
+
+        let content = result.get("content").unwrap().as_str().unwrap();
+        assert!(content.contains("[truncated:"), "Large files should be truncated");
+        assert!(content.len() < 15_000, "Output should be shorter than original");
+
+        drop(tmpdir);
+    }
+
+    #[tokio::test]
+    async fn read_file_small_file_not_truncated() {
+        let cwd = std::env::current_dir().unwrap();
+        let tmpdir = tempfile::tempdir_in(&cwd).unwrap();
+        let test_file = tmpdir.path().join("small.txt");
+        std::fs::write(&test_file, "Hello World").unwrap();
+
+        let tool = ReadFileTool::new();
+        let input = json!({"path": test_file.to_str().unwrap()});
+        let result = tool.execute(&input).await.unwrap();
+
+        let content = result.get("content").unwrap().as_str().unwrap();
+        assert_eq!(content, "Hello World");
+        assert!(!content.contains("[truncated:"), "Small files should not be truncated");
+
+        drop(tmpdir);
     }
 }

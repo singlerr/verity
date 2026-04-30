@@ -438,6 +438,146 @@ impl ResearcherLoop {
                 .and_then(|s| s.as_str())
                 .map(String::from)
                 .unwrap_or_default(),
+            "read_file" => {
+                let path = args.get("path").and_then(|p| p.as_str()).unwrap_or("");
+                let _ = tx.send(AgentEvent::StepProgress(
+                    iteration + 1,
+                    format!("Reading file: {}", path),
+                ));
+                match self.tool_registry.get("read_file") {
+                    Some(tool) => match tool.execute(&args).await {
+                        Ok(val) => {
+                            let content = val.get("content").and_then(|c| c.as_str()).unwrap_or("");
+                            content.to_string()
+                        }
+                        Err(e) => format!("Read file error: {}", e),
+                    },
+                    None => "Read file tool not available".into(),
+                }
+            }
+            "list_dir" => {
+                let path = args.get("path").and_then(|p| p.as_str()).unwrap_or("");
+                let _ = tx.send(AgentEvent::StepProgress(
+                    iteration + 1,
+                    format!("Listing directory: {}", path),
+                ));
+                match self.tool_registry.get("list_dir") {
+                    Some(tool) => match tool.execute(&args).await {
+                        Ok(val) => {
+                            let tree = val.get("tree").and_then(|t| t.as_str()).unwrap_or("");
+                            tree.to_string()
+                        }
+                        Err(e) => format!("List dir error: {}", e),
+                    },
+                    None => "List dir tool not available".into(),
+                }
+            }
+            "write_file" => {
+                let path = args.get("path").and_then(|p| p.as_str()).unwrap_or("");
+                let _ = tx.send(AgentEvent::StepProgress(
+                    iteration + 1,
+                    format!("Writing file: {}", path),
+                ));
+                match self.tool_registry.get("write_file") {
+                    Some(tool) => match tool.execute(&args).await {
+                        Ok(val) => {
+                            let success = val.get("success").and_then(|s| s.as_bool()).unwrap_or(false);
+                            let result_path = val.get("path").and_then(|p| p.as_str()).unwrap_or("");
+                            if success {
+                                format!("Successfully wrote file: {}", result_path)
+                            } else {
+                                format!("Failed to write file: {}", result_path)
+                            }
+                        }
+                        Err(e) => format!("Write file error: {}", e),
+                    },
+                    None => "Write file tool not available".into(),
+                }
+            }
+            "shell" => {
+                let command = args.get("command").and_then(|c| c.as_str()).unwrap_or("");
+                let _ = tx.send(AgentEvent::StepProgress(
+                    iteration + 1,
+                    format!("Running shell command: {}", command),
+                ));
+                match self.tool_registry.get("shell") {
+                    Some(tool) => match tool.execute(&args).await {
+                        Ok(val) => {
+                            let stdout = val.get("stdout").and_then(|s| s.as_str()).unwrap_or("");
+                            let stderr = val.get("stderr").and_then(|s| s.as_str()).unwrap_or("");
+                            let _exit_code = val.get("exit_code").and_then(|c| c.as_i64()).unwrap_or(0);
+                            if stderr.is_empty() {
+                                format!("Output:\n{}", stdout)
+                            } else {
+                                format!("Output:\n{}\nStderr:\n{}", stdout, stderr)
+                            }
+                        }
+                        Err(e) => format!("Shell error: {}", e),
+                    },
+                    None => "Shell tool not available".into(),
+                }
+            }
+            "grep" => {
+                let pattern = args.get("pattern").and_then(|p| p.as_str()).unwrap_or("");
+                let _ = tx.send(AgentEvent::StepProgress(
+                    iteration + 1,
+                    format!("Searching for: {}", pattern),
+                ));
+                match self.tool_registry.get("grep") {
+                    Some(tool) => match tool.execute(&args).await {
+                        Ok(val) => {
+                            let matches = val.get("matches").and_then(|m| m.as_str()).unwrap_or("");
+                            matches.to_string()
+                        }
+                        Err(e) => format!("Grep error: {}", e),
+                    },
+                    None => "Grep tool not available".into(),
+                }
+            }
+            "glob" => {
+                let pattern = args.get("pattern").and_then(|p| p.as_str()).unwrap_or("");
+                let _ = tx.send(AgentEvent::StepProgress(
+                    iteration + 1,
+                    format!("Finding files: {}", pattern),
+                ));
+                match self.tool_registry.get("glob") {
+                    Some(tool) => match tool.execute(&args).await {
+                        Ok(val) => {
+                            let files = val.get("files").and_then(|f| f.as_array())
+                                .map(|arr| arr.iter()
+                                    .filter_map(|v| v.as_str())
+                                    .collect::<Vec<_>>()
+                                    .join("\n"))
+                                .unwrap_or_default();
+                            files
+                        }
+                        Err(e) => format!("Glob error: {}", e),
+                    },
+                    None => "Glob tool not available".into(),
+                }
+            }
+            "edit_file" => {
+                let path = args.get("path").and_then(|p| p.as_str()).unwrap_or("");
+                let _ = tx.send(AgentEvent::StepProgress(
+                    iteration + 1,
+                    format!("Editing file: {}", path),
+                ));
+                match self.tool_registry.get("edit_file") {
+                    Some(tool) => match tool.execute(&args).await {
+                        Ok(val) => {
+                            let success = val.get("success").and_then(|s| s.as_bool()).unwrap_or(false);
+                            let replacements = val.get("replacements").and_then(|r| r.as_i64()).unwrap_or(0);
+                            if success {
+                                format!("Successfully made {} replacement(s)", replacements)
+                            } else {
+                                "Edit failed".to_string()
+                            }
+                        }
+                        Err(e) => format!("Edit file error: {}", e),
+                    },
+                    None => "Edit file tool not available".into(),
+                }
+            }
             _ => format!("Unknown tool: {}", tc.name),
         }
     }

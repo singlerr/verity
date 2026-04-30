@@ -151,6 +151,9 @@ impl AgentOrchestrator {
             return;
         }
 
+        // LocalAnalysis, WebResearch, and Mixed all route through the researcher loop.
+        // LocalAnalysis benefits from local tools (read_file, list_dir, grep, glob, edit_file)
+        // which are now available in all research modes.
         let depth = match classified.intent {
             QueryIntent::DirectAnswer => ResearchDepth::Speed,
             _ if classified.quality => ResearchDepth::Quality,

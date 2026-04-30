@@ -45,7 +45,11 @@ Action: done.
 - NEVER output normal text to the user. ONLY call tools.
 - Default to web_search when information is missing or stale; keep queries targeted (max 3 per call).
 - Call done when you have gathered enough to answer.
-</response_protocol>"#.to_string()
+</response_protocol>
+
+<local_tools>
+If the question involves local files, code, or the current project directory, use read_file, list_dir, grep, or glob to explore the codebase before answering.
+</local_tools>"#.to_string()
 }
 
 fn get_balanced_prompt() -> String {
@@ -106,7 +110,11 @@ Action: done.
 - You MUST call __reasoning_preamble before every tool call (including done)
 - Collect information efficiently: search multiple angles in parallel when helpful
 - Call done when you have gathered enough to give a well-rounded answer
-</response_protocol>"#.to_string()
+</response_protocol>
+
+<local_tools>
+If the question involves local files, code, or the current project directory, use read_file, list_dir, grep, or glob to explore the codebase. Use edit_file to make precise changes or write_file to create files when the user asks for code modifications.
+</local_tools>"#.to_string()
 }
 
 fn get_quality_prompt() -> String {
@@ -203,7 +211,11 @@ Action: done.
 - Plan your research to systematically cover multiple angles
 - Gather 4-7+ information-gathering calls across different angles before done
 - Your final answer must be comprehensive with full citations
-</response_protocol>"#.to_string()
+</response_protocol>
+
+<local_tools>
+When researching local code or project files, use read_file, list_dir, grep, and glob extensively to understand the codebase. Use edit_file for precise code changes or write_file for new files. Combine local analysis with web research for comprehensive answers (e.g., comparing local code against latest best practices).
+</local_tools>"#.to_string()
 }
 
 pub fn get_user_prompt(query: &str, iteration: usize, max_iterations: usize) -> String {
@@ -306,14 +318,146 @@ pub fn get_tool_definitions() -> Vec<ToolDefinition> {
                 "required": ["summary"]
             }),
         },
+        ToolDefinition {
+            name: "read_file".into(),
+            description: "Read the contents of a file from the local filesystem. Returns the text content of the file.".into(),
+            parameters: serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "path": {
+                        "type": "string",
+                        "description": "The path to the file to read."
+                    },
+                    "range": {
+                        "type": "array",
+                        "items": {
+                            "type": "integer"
+                        },
+                        "description": "Optional line range [start, end] to read specific portions of the file."
+                    }
+                },
+                "required": ["path"]
+            }),
+        },
+        ToolDefinition {
+            name: "list_dir".into(),
+            description: "List the contents of a directory. Returns a list of files and subdirectories.".into(),
+            parameters: serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "path": {
+                        "type": "string",
+                        "description": "The path to the directory to list. Defaults to current directory."
+                    }
+                }
+            }),
+        },
+        ToolDefinition {
+            name: "write_file".into(),
+            description: "Write content to a file. Creates the file if it doesn't exist, or overwrites it if it does.".into(),
+            parameters: serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "path": {
+                        "type": "string",
+                        "description": "The path to the file to write."
+                    },
+                    "content": {
+                        "type": "string",
+                        "description": "The content to write to the file."
+                    }
+                },
+                "required": ["path", "content"]
+            }),
+        },
+        ToolDefinition {
+            name: "shell".into(),
+            description: "Execute a shell command and return its output. Use for running scripts, compiling, or system operations.".into(),
+            parameters: serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "command": {
+                        "type": "string",
+                        "description": "The shell command to execute."
+                    }
+                },
+                "required": ["command"]
+            }),
+        },
+        ToolDefinition {
+            name: "grep".into(),
+            description: "Search for a pattern within files. Returns matching lines with context.".into(),
+            parameters: serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "pattern": {
+                        "type": "string",
+                        "description": "The regex pattern to search for."
+                    },
+                    "path": {
+                        "type": "string",
+                        "description": "The path to search in. Defaults to current directory."
+                    }
+                },
+                "required": ["pattern"]
+            }),
+        },
+        ToolDefinition {
+            name: "glob".into(),
+            description: "Find files matching a glob pattern. Supports wildcards like *.rs, **/*.md, etc.".into(),
+            parameters: serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "pattern": {
+                        "type": "string",
+                        "description": "The glob pattern to match files against."
+                    },
+                    "path": {
+                        "type": "string",
+                        "description": "The path to search in. Defaults to current directory."
+                    }
+                },
+                "required": ["pattern"]
+            }),
+        },
+        ToolDefinition {
+            name: "edit_file".into(),
+            description: "Make a precise edit to a file by replacing old_string with new_string. Use this for targeted changes rather than overwriting entire files.".into(),
+            parameters: serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "path": {
+                        "type": "string",
+                        "description": "The path to the file to edit."
+                    },
+                    "old_string": {
+                        "type": "string",
+                        "description": "The exact text to find and replace."
+                    },
+                    "new_string": {
+                        "type": "string",
+                        "description": "The replacement text."
+                    },
+                    "replace_all": {
+                        "type": "boolean",
+                        "description": "If true, replace all occurrences of old_string. Defaults to false."
+                    }
+                },
+                "required": ["path", "old_string", "new_string"]
+            }),
+        },
     ]
 }
 
 pub fn build_initial_messages(query: &str, depth: ResearchDepth) -> Vec<ResearcherMessage> {
     let system = get_system_prompt(depth);
+    let cwd = std::env::current_dir()
+        .map(|p| p.to_string_lossy().to_string())
+        .unwrap_or_else(|_| ".".to_string());
+    let system_with_cwd = format!("You are working in directory: {}\n\n{}", cwd, system);
     let user = get_user_prompt(query, 0, depth.max_iterations());
     vec![
-        ResearcherMessage::System { content: system },
+        ResearcherMessage::System { content: system_with_cwd },
         ResearcherMessage::User { content: user },
     ]
 }
@@ -325,12 +469,19 @@ mod tests {
     #[test]
     fn tool_definitions_count() {
         let tools = get_tool_definitions();
-        assert_eq!(tools.len(), 4);
+        assert_eq!(tools.len(), 11);
         let names: Vec<&str> = tools.iter().map(|t| t.name.as_str()).collect();
         assert!(names.contains(&"web_search"));
         assert!(names.contains(&"scrape_url"));
         assert!(names.contains(&"__reasoning_preamble"));
         assert!(names.contains(&"done"));
+        assert!(names.contains(&"read_file"));
+        assert!(names.contains(&"list_dir"));
+        assert!(names.contains(&"write_file"));
+        assert!(names.contains(&"shell"));
+        assert!(names.contains(&"grep"));
+        assert!(names.contains(&"glob"));
+        assert!(names.contains(&"edit_file"));
     }
 
     #[test]
@@ -399,6 +550,17 @@ mod tests {
         assert_eq!(msgs.len(), 2);
         assert!(matches!(msgs[0], ResearcherMessage::System { .. }));
         assert!(matches!(msgs[1], ResearcherMessage::User { .. }));
+    }
+
+    #[test]
+    fn build_initial_messages_includes_cwd() {
+        let msgs = build_initial_messages("test query", ResearchDepth::Balanced);
+        let system_content = match &msgs[0] {
+            ResearcherMessage::System { content } => content,
+            _ => panic!("Expected system message"),
+        };
+        assert!(system_content.contains("You are working in directory:"));
+        assert!(system_content.contains(std::path::MAIN_SEPARATOR.to_string().as_str()));
     }
 
     #[test]

@@ -5,8 +5,8 @@ pub use planner::AgentPlanner;
 pub mod tools;
 
 pub use tools::{
-    build_tool_registry, tool_manifest, ListDirTool, ReadFileTool, ReadUrlTool, SearchTool,
-    ShellTool, Tool, ToolRegistry, WriteFileTool,
+    build_tool_registry, tool_manifest, EditFileTool, GrepTool, ListDirTool, ReadFileTool,
+    ReadUrlTool, SearchTool, ShellTool, Tool, ToolRegistry, WriteFileTool,
 };
 
 pub mod classifier;
