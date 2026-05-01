@@ -1,5 +1,7 @@
 //! ResearcherContext — context window management for the researcher loop.
 
+use tracing::warn;
+
 use super::{ResearchDepth, ResearcherMessage};
 
 const DEFAULT_MAX_BUDGET: usize = 100_000; // ~100k tokens
@@ -80,12 +82,16 @@ impl ResearcherContext {
             return;
         }
 
+        let mut removed_tool_results = 0usize;
+        let mut removed_pairs = 0usize;
+
         // Phase 1: remove oldest tool results first, but skip reasoning preambles
         let mut i = 1;
         while i < self.messages.len() && self.is_over_budget() {
             if let ResearcherMessage::ToolResult { name, .. } = &self.messages[i] {
                 if name != "__reasoning_preamble" {
                     self.messages.remove(i);
+                    removed_tool_results += 1;
                 } else {
                     i += 1;
                 }
@@ -94,17 +100,26 @@ impl ResearcherContext {
             }
         }
 
+        if removed_tool_results > 0 {
+            warn!("Context truncated: removed {} tool result messages", removed_tool_results);
+        }
+
         // Phase 2: remove oldest user/assistant pairs if still over budget
         let mut i = 1;
         while i < self.messages.len() && self.is_over_budget() {
             match &self.messages[i] {
                 ResearcherMessage::User { .. } | ResearcherMessage::Assistant { .. } => {
                     self.messages.remove(i);
+                    removed_pairs += 1;
                 }
                 _ => {
                     i += 1;
                 }
             }
+        }
+
+        if removed_pairs > 0 {
+            warn!("Context truncated: removed {} user/assistant messages", removed_pairs);
         }
     }
 

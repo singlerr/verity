@@ -4,6 +4,7 @@ use std::collections::HashSet;
 use std::sync::mpsc;
 use std::sync::Arc;
 
+use tracing::debug;
 use tokio_util::sync::CancellationToken;
 
 use super::{ExtractedFact, ResearchDepth, ResearcherContext, ResearcherMessage};
@@ -329,6 +330,7 @@ impl ResearcherLoop {
                     }
                 }
             }
+            debug!("Iteration {} complete, sources collected: {}", i + 1, sources.len());
             // Emit progress
             let _ = tx.send(AgentEvent::StepProgress(i + 1, String::from("progress")));
         }

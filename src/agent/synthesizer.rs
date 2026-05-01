@@ -3,6 +3,7 @@ use std::sync::Arc;
 use crate::agent::researcher::{ExtractedFact, ResearchDepth};
 use crate::app::Source;
 use crate::llm::provider::{LlmProvider, Message, Role};
+use tracing::{debug, info, warn};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Citation {
@@ -37,6 +38,8 @@ impl ResearchSynthesizer {
         depth: ResearchDepth,
         extracted_facts: &[ExtractedFact],
     ) -> Result<SynthesisOutput, String> {
+        let xml_context = Self::build_context(query, sources, extracted_facts);
+        debug!("XML context size: {} chars", xml_context.len());
         let messages = vec![
             Message {
                 role: Role::System,
@@ -44,9 +47,19 @@ impl ResearchSynthesizer {
             },
             Message {
                 role: Role::User,
-                content: Self::build_context(query, sources, extracted_facts),
+                content: xml_context,
             },
         ];
+        info!(
+            "Synthesizing with {} facts and {} sources",
+            extracted_facts.len(),
+            sources.len()
+        );
+        if sources.is_empty() && extracted_facts.is_empty() {
+            warn!(
+                "No usable sources or facts for synthesis; LLM may produce empty or ungrounded answer"
+            );
+        }
         let chunks = self
             .provider
             .stream_completion(&messages, &self.model)
@@ -84,7 +97,11 @@ impl ResearchSynthesizer {
         }
 
         xml.push_str("<search_results>\n");
-        for (idx, s) in sources.iter().enumerate() {
+        for (idx, s) in sources
+            .iter()
+            .filter(|s| !s.snippet.trim().is_empty())
+            .enumerate()
+        {
             xml.push_str(&format!(
                 r#"<result index="{}" url="{}" title="{}">{}</result>"#,
                 idx + 1,
@@ -95,6 +112,9 @@ impl ResearchSynthesizer {
             xml.push('\n');
         }
         xml.push_str("</search_results>");
+        if sources.iter().filter(|s| !s.snippet.trim().is_empty()).count() == 0 {
+            warn!("All search results have empty snippets; no results in synthesis context");
+        }
         xml
     }
 
@@ -278,5 +298,50 @@ mod tests {
         assert!(!xml.contains("&example"));
         assert!(xml.contains("&lt;special&gt;"));
         assert!(!xml.contains("<special>"));
+    }
+
+    #[test]
+    fn test_empty_snippet_filtering() {
+        let sources = vec![
+            Source {
+                num: 1,
+                domain: "good.com".into(),
+                title: "Good Result".into(),
+                url: "https://good.com/page".into(),
+                snippet: "This has real content".into(),
+                quote: "".into(),
+            },
+            Source {
+                num: 2,
+                domain: "empty.com".into(),
+                title: "Empty Snippet".into(),
+                url: "https://empty.com/page".into(),
+                snippet: "".into(),
+                quote: "".into(),
+            },
+            Source {
+                num: 3,
+                domain: "whitespace.com".into(),
+                title: "Whitespace Only".into(),
+                url: "https://whitespace.com/page".into(),
+                snippet: "   ".into(),
+                quote: "".into(),
+            },
+        ];
+        let facts: Vec<ExtractedFact> = vec![];
+        let xml = ResearchSynthesizer::build_context("test query", &sources, &facts);
+
+        assert!(xml.contains(r#"index="1""#));
+        assert!(xml.contains("https://good.com/page"));
+        assert!(xml.contains("Good Result"));
+        assert!(xml.contains("This has real content"));
+
+        assert!(!xml.contains("https://empty.com/page"));
+        assert!(!xml.contains("Empty Snippet"));
+        assert!(!xml.contains("https://whitespace.com/page"));
+        assert!(!xml.contains("Whitespace Only"));
+
+        let result_count = xml.matches("<result ").count();
+        assert_eq!(result_count, 1, "Expected exactly 1 <result> element, found {}", result_count);
     }
 }
