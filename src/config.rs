@@ -11,7 +11,7 @@ pub struct Config {
 impl Default for Config {
     fn default() -> Self {
         Self {
-            searxng_url: "http://localhost:8080".to_string(),
+            searxng_url: "http://localhost:8888".to_string(),
             active_model: "gpt-4o".to_string(),
         }
     }

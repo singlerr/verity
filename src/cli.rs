@@ -54,10 +54,11 @@ pub enum ConfigCmd {
 }
 
 /// Guard terminal and restore on drop
-struct TerminalGuard;
+pub struct TerminalGuard;
 impl Drop for TerminalGuard {
     fn drop(&mut self) {
         if is_raw_mode_enabled().unwrap_or(false) {
+            stdout().execute(DisableBracketedPaste).ok();
             stdout().execute(LeaveAlternateScreen).ok();
             disable_raw_mode().ok();
             stdout().execute(Show).ok();

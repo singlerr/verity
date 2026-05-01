@@ -20,7 +20,7 @@ pub async fn run_event_loop(
     mut app: App,
     mut agent_rx: tokio::sync::mpsc::Receiver<AgentEvent>,
     agent_tx: std::sync::mpsc::Sender<AgentEvent>,
-    _cancel_token: Arc<Mutex<Option<CancellationToken>>>,
+    cancel_token: Arc<Mutex<Option<CancellationToken>>>,
 ) -> Result<()> {
     loop {
         terminal.draw(|frame| {
@@ -38,11 +38,11 @@ pub async fn run_event_loop(
                 );
             }
         })?;
+        let mut should_quit = false;
         tokio::select! {
             poll_res = tokio::task::spawn_blocking(|| crossterm::event::poll(Duration::from_millis(50))) => {
                 if let Ok(Ok(true)) = poll_res {
                     if let Ok(event) = crossterm::event::read() {
-                        if let Event::Resize(_, _) = event { continue; }
                         if let Event::Key(KeyEvent { kind: KeyEventKind::Press, code, modifiers, .. }) = event {
                             if let AppState::Error(_) = app.state { app.state = AppState::Idle; continue; }
                             if app.model_select_open { handle_model_select(&mut app, code); continue; }
@@ -52,10 +52,17 @@ pub async fn run_event_loop(
                         }
                     }
                 }
+                if !app.running {
+                    cancel_token.lock().unwrap().take().map(|t| t.cancel());
+                    should_quit = true;
+                }
             }
             maybe_event = agent_rx.recv() => {
                 if let Some(event) = maybe_event { app.handle_event(event); }
             }
+        }
+        if should_quit {
+            break Ok(());
         }
     }
 }
@@ -125,8 +132,14 @@ fn handle_global_key(
     let ctrl = mods.contains(crossterm::event::KeyModifiers::CONTROL);
     let in_cmd = app.focus == Focus::Command;
     match code {
-        _ if ctrl && matches!(code, KeyCode::Char('d' | 'c')) => std::process::exit(0),
-        KeyCode::Char('q') if !in_cmd => std::process::exit(0),
+        _ if ctrl && matches!(code, KeyCode::Char('d' | 'c')) => {
+            app.running = false;
+            true
+        }
+        KeyCode::Char('q') if !in_cmd => {
+            app.running = false;
+            true
+        }
         KeyCode::Char('/') if !in_cmd => {
             app.focus = Focus::Command;
             app.query.push('/');

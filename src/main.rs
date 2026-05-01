@@ -22,6 +22,7 @@ async fn main() -> Result<()> {
         return Ok(());
     }
     let mut terminal = verity::cli::setup_terminal()?;
+    let _guard = verity::cli::TerminalGuard;
     let (std_tx, std_rx) = std::sync::mpsc::channel::<AgentEvent>();
     let (tokio_tx, tokio_rx) = tokio::sync::mpsc::channel::<AgentEvent>(100);
     thread::spawn(move || {
