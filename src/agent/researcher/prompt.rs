@@ -20,7 +20,7 @@ You are currently on iteration {i+1} of {max_iterations} so act efficiently.
 When you are finished, you must call the `done` tool. Never output text directly.
 
 <core_principle>
-Your knowledge is outdated; if you have web search, use it to ground answers even for seemingly basic facts.
+Choose the first tool from the user's request. Use local tools first for local files, code, or current-project questions. Use web_search first for current external facts, news, or information that cannot be learned from the workspace.
 </core_principle>
 
 <examples>
@@ -43,7 +43,7 @@ Action: done.
 
 <response_protocol>
 - NEVER output normal text to the user. ONLY call tools.
-- Default to web_search when information is missing or stale; keep queries targeted (max 3 per call).
+- Choose the best first tool instead of defaulting to web_search; keep web queries targeted (max 3 per call) when web research is needed.
 - Call done when you have gathered enough to answer.
 </response_protocol>
 
@@ -60,7 +60,7 @@ You are currently on iteration {i+1} of {max_iterations} so act efficiently.
 When you are finished, you must call the `done` tool. Never output text directly.
 
 <core_principle>
-Your knowledge is outdated; if you have web search, use it to ground answers even for seemingly basic facts. You MUST call __reasoning_preamble before every tool call to state your plan.
+Choose each tool from the user's request and what you have already learned. Use local tools first for local files, code, or current-project questions. Use web_search first for current external facts, news, or information that cannot be learned from the workspace. You MUST call __reasoning_preamble before every tool call to state your plan.
 </core_principle>
 
 <done_usage>
@@ -83,7 +83,14 @@ Action: __reasoning_preamble {"thoughts": "I need to find the latest Rust 2.0 re
 Action: web_search {"queries": ["Rust 2.0 features", "Rust 2.0 release announcement"]}
 Action: done.
 
-## Example 2: Multi-Step Research
+## Example 2: Local Project Analysis
+User: "Analyze the current project"
+Action: __reasoning_preamble {"thoughts": "This asks about the local workspace, so I should inspect the project structure before deciding whether web research is needed."}
+Action: list_dir {"path": "."}
+Action: grep {"pattern": "README|Cargo.toml|package.json", "path": "."}
+Action: done.
+
+## Example 3: Multi-Step Research
 User: "Compare Transformer and Mamba architectures"
 Action: __reasoning_preamble {"thoughts": "This is a technical comparison. I need definitions of both architectures, their key differences, and recent benchmarks."}
 Action: web_search {"queries": ["Transformer architecture explanation", "Mamba architecture explanation"]}
@@ -92,7 +99,7 @@ Action: __reasoning_preamble {"thoughts": "I've got definitions but need perform
 Action: web_search {"queries": ["Transformer vs Mamba benchmarks", "Mamba vs Transformer performance"]}
 Action: done.
 
-## Example 3: Surface-Level Answer Sufficient
+## Example 4: Surface-Level Answer Sufficient
 User: "What year did World War II end?"
 Action: __reasoning_preamble {"thoughts": "This is a factual question with a definitive answer. A quick search will confirm."}
 Action: web_search {"queries": ["World War II end year"]}
@@ -125,7 +132,7 @@ You are currently on iteration {i+1} of {max_iterations} so act efficiently.
 When you are finished, you must call the `done` tool. Never output text directly.
 
 <core_principle>
-Your knowledge is outdated; if you have web search, use it to ground answers even for seemingly basic facts. You MUST call __reasoning_preamble before every tool call to state your plan. Never settle for surface-level answers. Leave no stone unturned.
+Choose each next tool from the user's request and what you have already learned. Use local tools first for local files, code, or current-project questions. Use web_search first for current external facts, news, or information that cannot be learned from the workspace. You MUST call __reasoning_preamble before every tool call to state your plan. Never settle for surface-level answers. Leave no stone unturned.
 </core_principle>
 
 <research_strategy>
@@ -223,7 +230,7 @@ pub fn get_user_prompt(query: &str, iteration: usize, max_iterations: usize) -> 
 
     if iteration == 0 {
         format!(
-            "Research this question: {}\n\nStart by thinking through your approach, then search for information.\n\nToday's date: {}",
+            "Research this question: {}\n\nStart by choosing the best first tool for the request. For local code/current-project analysis, inspect the workspace before web search. For current external facts, use web_search.\n\nToday's date: {}",
             query,
             today
         )
@@ -235,7 +242,7 @@ pub fn get_user_prompt(query: &str, iteration: usize, max_iterations: usize) -> 
         )
     } else {
         format!(
-            "Iteration {}/{}: Continue researching: {}.\nIf you have enough information, call done(). Otherwise, search for more details.\n\nToday's date: {}",
+            "Iteration {}/{}: Continue researching: {}.\nIf you have enough information, call done(). Otherwise, choose the next local or web tool that best reduces uncertainty.\n\nToday's date: {}",
             iteration + 1,
             max_iterations,
             query,
@@ -457,7 +464,9 @@ pub fn build_initial_messages(query: &str, depth: ResearchDepth) -> Vec<Research
     let system_with_cwd = format!("You are working in directory: {}\n\n{}", cwd, system);
     let user = get_user_prompt(query, 0, depth.max_iterations());
     vec![
-        ResearcherMessage::System { content: system_with_cwd },
+        ResearcherMessage::System {
+            content: system_with_cwd,
+        },
         ResearcherMessage::User { content: user },
     ]
 }
@@ -472,6 +481,7 @@ mod tests {
         assert_eq!(tools.len(), 11);
         let names: Vec<&str> = tools.iter().map(|t| t.name.as_str()).collect();
         assert!(names.contains(&"web_search"));
+        assert!(!names.contains(&"search"));
         assert!(names.contains(&"scrape_url"));
         assert!(names.contains(&"__reasoning_preamble"));
         assert!(names.contains(&"done"));
@@ -545,6 +555,25 @@ mod tests {
     }
 
     #[test]
+    fn prompts_allow_adaptive_first_tool_choice() {
+        let user = get_user_prompt("현재 프로젝트 분석", 0, 6);
+        assert!(user.contains("choosing the best first tool"));
+        assert!(user.contains("inspect the workspace before web search"));
+
+        let speed = get_system_prompt(ResearchDepth::Speed);
+        assert!(speed.contains("Choose the first tool from the user's request"));
+        assert!(speed
+            .contains("Use local tools first for local files, code, or current-project questions"));
+
+        let balanced = get_system_prompt(ResearchDepth::Balanced);
+        assert!(balanced.contains("Local Project Analysis"));
+
+        let quality = get_system_prompt(ResearchDepth::Quality);
+        assert!(quality
+            .contains("Use local tools first for local files, code, or current-project questions"));
+    }
+
+    #[test]
     fn build_initial_messages_has_system_and_user() {
         let msgs = build_initial_messages("test query", ResearchDepth::Balanced);
         assert_eq!(msgs.len(), 2);
@@ -579,6 +608,19 @@ mod tests {
         assert!(params.get("properties").unwrap().get("queries").is_some());
         let queries_schema = params.get("properties").unwrap().get("queries").unwrap();
         assert_eq!(queries_schema.get("type").unwrap(), "array");
+    }
+
+    #[test]
+    fn prompts_reference_canonical_web_search_name() {
+        for depth in [
+            ResearchDepth::Speed,
+            ResearchDepth::Balanced,
+            ResearchDepth::Quality,
+        ] {
+            let prompt = get_system_prompt(depth);
+            assert!(prompt.contains("web_search"));
+            assert!(!prompt.contains("Action: search"));
+        }
     }
 
     #[test]

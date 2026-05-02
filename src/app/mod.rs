@@ -155,3 +155,54 @@ impl Default for App {
         Self::new()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::agent::classifier::QueryIntent;
+    use crate::agent::orchestrator::AgentEvent;
+
+    #[test]
+    fn research_trace_events_are_recorded() {
+        let mut app = App::new();
+
+        app.handle_event(AgentEvent::Classified(QueryIntent::WebResearch));
+        assert_eq!(app.state, AppState::Classifying);
+
+        app.handle_event(AgentEvent::StepProgress(
+            0,
+            "research:classify=web_research depth=quality skip_search=false".into(),
+        ));
+        app.handle_event(AgentEvent::SearchingIteration {
+            current: 1,
+            max: 3,
+            query: "rust async".into(),
+        });
+
+        assert_eq!(app.trace_lines.len(), 2);
+        assert_eq!(app.trace_lines[0].kind, LineKind::Out);
+        assert_eq!(
+            app.trace_lines[0].text,
+            "research:classify=web_research depth=quality skip_search=false"
+        );
+        assert_eq!(app.trace_lines[1].text, "Searching (1/3) for: rust async");
+        assert_eq!(app.state, AppState::Researching);
+    }
+
+    #[test]
+    fn research_trace_events_cover_local_analysis_and_terminal_states() {
+        let mut app = App::new();
+
+        app.handle_event(AgentEvent::StepProgress(
+            0,
+            "research:classify=local_analysis depth=balanced skip_search=false".into(),
+        ));
+        app.handle_event(AgentEvent::StepProgress(1, "research:no_tool_calls".into()));
+        app.handle_event(AgentEvent::StepProgress(0, "research:final sources=0 facts=0".into()));
+
+        assert_eq!(app.trace_lines.len(), 3);
+        assert_eq!(app.trace_lines[0].text, "research:classify=local_analysis depth=balanced skip_search=false");
+        assert_eq!(app.trace_lines[1].text, "research:no_tool_calls");
+        assert_eq!(app.trace_lines[2].text, "research:final sources=0 facts=0");
+    }
+}

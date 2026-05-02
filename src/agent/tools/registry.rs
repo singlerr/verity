@@ -34,7 +34,7 @@ pub fn tool_manifest() -> String {
     format!(
         "Current working directory: {cwd}\n\n\
          Available tools:\
-         - search(query) — search the web
+         - web_search(queries) — search the web
          - read_url(url) — fetch and read a web page
          - read_file(path, range?) — read a local file; range is optional [start_line, end_line]
          - write_file(path, content) — write or overwrite a local file
@@ -98,7 +98,11 @@ fn format_tree(tree: &FileTree, depth: usize, max_depth: usize) -> String {
     let mut out = format!("{}{}{}\n", indent, marker, tree.name);
     if depth >= max_depth - 1 {
         if !tree.children.is_empty() {
-            out.push_str(&format!("{}  [{} items not shown]\n", indent, tree.children.len()));
+            out.push_str(&format!(
+                "{}  [{} items not shown]\n",
+                indent,
+                tree.children.len()
+            ));
         }
     } else {
         for child in &tree.children {
@@ -110,4 +114,17 @@ fn format_tree(tree: &FileTree, depth: usize, max_depth: usize) -> String {
 
 pub(crate) fn format_dir_tree(tree: &FileTree, depth: usize, max_depth: usize) -> String {
     format_tree(tree, depth, max_depth)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn tool_manifest_advertises_web_search() {
+        let manifest = tool_manifest();
+
+        assert!(manifest.contains("- web_search(queries)"));
+        assert!(!manifest.contains("- search(query)"));
+    }
 }

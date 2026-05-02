@@ -2,7 +2,9 @@
 
 pub mod local;
 pub mod registry;
-pub use local::{sandbox_path, EditFileTool, GlobTool, GrepTool, ListDirTool, ShellTool, WriteFileTool};
+pub use local::{
+    sandbox_path, EditFileTool, GlobTool, GrepTool, ListDirTool, ShellTool, WriteFileTool,
+};
 pub use registry::{build_tool_registry, tool_manifest};
 
 use crate::fs::read::read_file;
@@ -14,6 +16,9 @@ use serde_json::{json, Value};
 use std::collections::{HashMap, HashSet};
 use std::path::Path;
 use std::sync::Arc;
+
+pub const WEB_SEARCH_TOOL_NAME: &str = "web_search";
+pub const LEGACY_SEARCH_TOOL_NAME: &str = "search";
 
 /// Trait for agent tools.
 #[async_trait]
@@ -52,21 +57,32 @@ impl SearchTool {
 #[async_trait]
 impl Tool for SearchTool {
     fn name(&self) -> &str {
-        "search"
+        WEB_SEARCH_TOOL_NAME
     }
 
     async fn execute(&self, input: &Value) -> Result<Value> {
         let max_queries = 3;
         let queries: Vec<String> =
             if let Some(queries_array) = input.get("queries").and_then(|v| v.as_array()) {
-                queries_array
+                let normalized_queries: Vec<String> = queries_array
                     .iter()
-                    .take(max_queries)
-                    .filter_map(|v| v.as_str().map(String::from))
+                    .filter_map(|v| v.as_str().map(str::trim))
                     .filter(|s| !s.is_empty())
-                    .collect()
+                    .take(max_queries)
+                    .map(String::from)
+                    .collect();
+
+                if normalized_queries.is_empty() {
+                    return Err(anyhow::anyhow!("No valid queries provided"));
+                }
+
+                normalized_queries
             } else if let Some(single_query) = input.get("query").and_then(|v| v.as_str()) {
-                vec![single_query.to_string()]
+                let query = single_query.trim();
+                if query.is_empty() {
+                    return Err(anyhow::anyhow!("No valid queries provided"));
+                }
+                vec![query.to_string()]
             } else {
                 return Err(anyhow::anyhow!(
                     "Missing 'query' or 'queries' field in input"
@@ -78,14 +94,12 @@ impl Tool for SearchTool {
         }
 
         // Prefer categories from input args, fall back to self.categories
-        let cats: Vec<&str> = if let Some(cats_arr) = input.get("categories").and_then(|v| v.as_array()) {
-            cats_arr
-                .iter()
-                .filter_map(|v| v.as_str())
-                .collect()
-        } else {
-            self.categories.iter().map(|s| s.as_str()).collect()
-        };
+        let cats: Vec<&str> =
+            if let Some(cats_arr) = input.get("categories").and_then(|v| v.as_array()) {
+                cats_arr.iter().filter_map(|v| v.as_str()).collect()
+            } else {
+                self.categories.iter().map(|s| s.as_str()).collect()
+            };
         let cats_ref: &[&str] = if cats.is_empty() { &["general"] } else { &cats };
 
         let search_futures: Vec<_> = queries
@@ -233,7 +247,10 @@ impl Tool for ReadFileTool {
         let output = if content.len() > MAX_CHARS {
             let total_lines = content.lines().count();
             let truncated: String = content.chars().take(MAX_CHARS).collect();
-            format!("{}\n\n[truncated: {} total lines. Use range parameter to read specific sections.]", truncated, total_lines)
+            format!(
+                "{}\n\n[truncated: {} total lines. Use range parameter to read specific sections.]",
+                truncated, total_lines
+            )
         } else {
             content
         };
@@ -261,7 +278,16 @@ impl ToolRegistry {
     }
 
     pub fn get(&self, name: &str) -> Option<Arc<dyn Tool>> {
-        self.tools.get(name).cloned()
+        self.tools
+            .get(name)
+            .or_else(|| {
+                if name == LEGACY_SEARCH_TOOL_NAME {
+                    self.tools.get(WEB_SEARCH_TOOL_NAME)
+                } else {
+                    None
+                }
+            })
+            .cloned()
     }
 }
 
@@ -311,6 +337,21 @@ mod tests {
             snippet: snippet.to_string(),
             engine: "mock".to_string(),
         }
+    }
+
+    #[test]
+    fn search_tool_uses_web_search_name() {
+        let tool = SearchTool::new(Arc::new(MockSearchEngine::new()));
+        assert_eq!(tool.name(), WEB_SEARCH_TOOL_NAME);
+    }
+
+    #[test]
+    fn registry_keeps_legacy_search_lookup_alias() {
+        let mut registry = ToolRegistry::new();
+        registry.register(SearchTool::new(Arc::new(MockSearchEngine::new())));
+
+        assert!(registry.get(WEB_SEARCH_TOOL_NAME).is_some());
+        assert!(registry.get(LEGACY_SEARCH_TOOL_NAME).is_some());
     }
 
     #[tokio::test]
@@ -369,6 +410,21 @@ mod tests {
 
         let results = result.get("results").unwrap().as_array().unwrap();
         assert_eq!(results.len(), 2);
+    }
+
+    #[tokio::test]
+    async fn test_search_empty_single_query_is_rejected() {
+        let mock = MockSearchEngine::new();
+        let tool = SearchTool::new(Arc::new(mock));
+
+        let input = json!({"query": "   "});
+        let result = tool.execute(&input).await;
+
+        assert!(result.is_err());
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("No valid queries provided"));
     }
 
     #[tokio::test]
@@ -483,6 +539,52 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_search_whitespace_queries_array_is_rejected() {
+        let mock = MockSearchEngine::new();
+        let tool = SearchTool::new(Arc::new(mock));
+
+        let input = json!({"queries": ["  ", "\t\n"]});
+        let result = tool.execute(&input).await;
+
+        assert!(result.is_err());
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("No valid queries provided"));
+    }
+
+    #[tokio::test]
+    async fn test_search_normalizes_before_applying_cap() {
+        let mock = MockSearchEngine::new()
+            .with_result(
+                "one",
+                vec![make_result("One", "https://example.com/1", "Snippet 1")],
+            )
+            .with_result(
+                "two",
+                vec![make_result("Two", "https://example.com/2", "Snippet 2")],
+            )
+            .with_result(
+                "three",
+                vec![make_result("Three", "https://example.com/3", "Snippet 3")],
+            )
+            .with_result(
+                "four",
+                vec![make_result("Four", "https://example.com/4", "Snippet 4")],
+            );
+        let tool = SearchTool::new(Arc::new(mock));
+
+        let input = json!({"queries": ["   ", " one ", " two ", " three ", " four "]});
+        let result = tool.execute(&input).await.unwrap();
+
+        let results = result.get("results").unwrap().as_array().unwrap();
+        assert_eq!(results.len(), 3);
+        assert_eq!(results[0].get("title").unwrap().as_str().unwrap(), "One");
+        assert_eq!(results[1].get("title").unwrap().as_str().unwrap(), "Two");
+        assert_eq!(results[2].get("title").unwrap().as_str().unwrap(), "Three");
+    }
+
+    #[tokio::test]
     async fn test_search_backward_compatibility() {
         let mock = MockSearchEngine::new().with_result(
             "test query",
@@ -504,7 +606,10 @@ mod tests {
         let nested = tmpdir.path().join("sub").join("new_file.txt");
         std::fs::create_dir(tmpdir.path().join("sub")).unwrap();
         let result = local::sandbox_path(&nested);
-        assert!(result.is_ok(), "Creating new files in existing CWD subdirectories should be allowed");
+        assert!(
+            result.is_ok(),
+            "Creating new files in existing CWD subdirectories should be allowed"
+        );
 
         drop(tmpdir);
     }
@@ -522,8 +627,14 @@ mod tests {
         let result = tool.execute(&input).await.unwrap();
 
         let content = result.get("content").unwrap().as_str().unwrap();
-        assert!(content.contains("[truncated:"), "Large files should be truncated");
-        assert!(content.len() < 15_000, "Output should be shorter than original");
+        assert!(
+            content.contains("[truncated:"),
+            "Large files should be truncated"
+        );
+        assert!(
+            content.len() < 15_000,
+            "Output should be shorter than original"
+        );
 
         drop(tmpdir);
     }
@@ -541,7 +652,10 @@ mod tests {
 
         let content = result.get("content").unwrap().as_str().unwrap();
         assert_eq!(content, "Hello World");
-        assert!(!content.contains("[truncated:"), "Small files should not be truncated");
+        assert!(
+            !content.contains("[truncated:"),
+            "Small files should not be truncated"
+        );
 
         drop(tmpdir);
     }
@@ -551,7 +665,11 @@ mod tests {
         struct FailingSearchEngine;
         #[async_trait]
         impl SearchEngine for FailingSearchEngine {
-            async fn search(&self, _query: &str, _categories: &[&str]) -> Result<Vec<SearchResult>> {
+            async fn search(
+                &self,
+                _query: &str,
+                _categories: &[&str],
+            ) -> Result<Vec<SearchResult>> {
                 anyhow::bail!("connection refused")
             }
         }
@@ -561,8 +679,58 @@ mod tests {
         let results = result.get("results").unwrap().as_array().unwrap();
         assert!(!results.is_empty());
         let error_result = &results[0];
-        assert_eq!(error_result.get("title").unwrap().as_str().unwrap(), "Search Error");
-        assert!(error_result.get("snippet").unwrap().as_str().unwrap().contains("connection refused"));
+        assert_eq!(
+            error_result.get("title").unwrap().as_str().unwrap(),
+            "Search Error"
+        );
+        assert!(error_result
+            .get("url")
+            .unwrap()
+            .as_str()
+            .unwrap()
+            .is_empty());
+        assert!(error_result
+            .get("snippet")
+            .unwrap()
+            .as_str()
+            .unwrap()
+            .contains("connection refused"));
+    }
+
+    #[tokio::test]
+    async fn test_search_partial_failure_keeps_successful_results_and_sentinel() {
+        struct PartiallyFailingSearchEngine;
+        #[async_trait]
+        impl SearchEngine for PartiallyFailingSearchEngine {
+            async fn search(&self, query: &str, _categories: &[&str]) -> Result<Vec<SearchResult>> {
+                match query {
+                    "good query" => Ok(vec![make_result(
+                        "Good Result",
+                        "https://example.com/good",
+                        "Good snippet",
+                    )]),
+                    "bad query" => anyhow::bail!("timed out"),
+                    other => anyhow::bail!("unexpected query: {other}"),
+                }
+            }
+        }
+
+        let tool = SearchTool::new(Arc::new(PartiallyFailingSearchEngine));
+        let input = json!({"queries": ["good query", "bad query"]});
+        let result = tool.execute(&input).await.unwrap();
+
+        let results = result.get("results").unwrap().as_array().unwrap();
+        assert_eq!(results.len(), 2);
+        assert_eq!(results[0].get("title").unwrap().as_str().unwrap(), "Good Result");
+        assert_eq!(results[0].get("url").unwrap().as_str().unwrap(), "https://example.com/good");
+        assert_eq!(results[1].get("title").unwrap().as_str().unwrap(), "Search Error");
+        assert!(results[1].get("url").unwrap().as_str().unwrap().is_empty());
+        assert!(results[1]
+            .get("snippet")
+            .unwrap()
+            .as_str()
+            .unwrap()
+            .contains("bad query"));
     }
 
     #[tokio::test]
@@ -579,7 +747,10 @@ mod tests {
                 }
             }
             fn with_result(self, query: &str, results: Vec<SearchResult>) -> Self {
-                self.results.lock().unwrap().insert(query.to_string(), results);
+                self.results
+                    .lock()
+                    .unwrap()
+                    .insert(query.to_string(), results);
                 self
             }
         }
@@ -594,8 +765,10 @@ mod tests {
             }
         }
 
-        let mock = CategoryRecordingEngine::new()
-            .with_result("test query", vec![make_result("Result", "https://example.com", "Test snippet")]);
+        let mock = CategoryRecordingEngine::new().with_result(
+            "test query",
+            vec![make_result("Result", "https://example.com", "Test snippet")],
+        );
         let tool = SearchTool::with_categories(Arc::new(mock), vec!["news".to_string()]);
 
         let input = json!({"query": "test query"});
@@ -616,7 +789,10 @@ mod tests {
                 }
             }
             fn with_result(self, query: &str, results: Vec<SearchResult>) -> Self {
-                self.results.lock().unwrap().insert(query.to_string(), results);
+                self.results
+                    .lock()
+                    .unwrap()
+                    .insert(query.to_string(), results);
                 self
             }
             fn get_categories(&self) -> Vec<String> {
@@ -634,8 +810,10 @@ mod tests {
             }
         }
 
-        let mock = Arc::new(CategoryRecordingEngine::new()
-            .with_result("test query", vec![make_result("Result", "https://example.com", "Test snippet")]));
+        let mock = Arc::new(CategoryRecordingEngine::new().with_result(
+            "test query",
+            vec![make_result("Result", "https://example.com", "Test snippet")],
+        ));
         let tool = SearchTool::with_categories(mock.clone(), vec!["general".to_string()]);
 
         let input = json!({"query": "test query", "categories": ["news"]});
