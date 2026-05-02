@@ -99,9 +99,15 @@ pub async fn fetch_model_list(pr: Arc<ProviderRegistry>, tx: std::sync::mpsc::Se
                     let _ = w.authenticate(&creds.api_key).await;
                 }
             } else {
-                // Providers like Ollama don't need API keys — just connectivity check
-                let mut w = handle.write().await;
-                let _ = w.authenticate("").await;
+                // Providers without API keys — apply base_url if configured
+                let base_url = cred_store.get(&provider_name).and_then(|c| c.base_url.clone());
+                {
+                    let mut w = handle.write().await;
+                    if let Some(url) = base_url {
+                        w.set_base_url(url);
+                    }
+                    let _ = w.authenticate("").await;
+                }
             }
 
             let lock = handle.read().await;

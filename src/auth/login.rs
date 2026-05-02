@@ -22,11 +22,13 @@ pub enum AuthAction {
 enum InputState {
     SelectingProvider,
     EnteringKey { provider: String },
+    EnteringUrl { provider: String },
 }
 
 struct ProviderInfo {
     display_name: String,
     key: String,
+    requires_api_key: bool,
 }
 
 pub struct AuthLoginScreen {
@@ -46,7 +48,8 @@ impl AuthLoginScreen {
             .filter_map(|name| {
                 pr.get_metadata(&name).map(|meta| ProviderInfo {
                     display_name: meta.display_name.clone(),
-                    key: name,
+                    key: name.clone(),
+                    requires_api_key: meta.requires_api_key,
                 })
             })
             .collect();
@@ -64,7 +67,8 @@ impl AuthLoginScreen {
         let c = ColorScheme::default();
         match &self.state {
             InputState::SelectingProvider => self.render_select(frame, area, &c),
-            InputState::EnteringKey { provider } => self.render_input(frame, area, provider, &c),
+            InputState::EnteringKey { provider } => self.render_input(frame, area, provider, &c, false),
+            InputState::EnteringUrl { provider } => self.render_input(frame, area, provider, &c, true),
         }
     }
 
@@ -119,7 +123,10 @@ impl AuthLoginScreen {
         );
     }
 
-    fn render_input(&self, frame: &mut Frame, area: Rect, provider: &str, c: &ColorScheme) {
+    fn render_input(&self, frame: &mut Frame, area: Rect, provider: &str, c: &ColorScheme, is_url: bool) {
+        let label = if is_url { format!("Enter base URL for {}", provider) } else { format!("Enter API key for {}", provider) };
+        let hint = "[Enter] submit  [Esc] back  [q] quit";
+        let display_input = if is_url { self.key_input.clone() } else { self.key_input.chars().map(|_| '•').collect::<String>() };
         let chunks = Layout::default()
             .direction(Direction::Vertical)
             .constraints([
@@ -131,11 +138,11 @@ impl AuthLoginScreen {
             .margin(2)
             .split(area);
         frame.render_widget(
-            Paragraph::new(format!("Enter API key for {}", provider))
+            Paragraph::new(label)
                 .style(Style::default().fg(c.ink).add_modifier(Modifier::BOLD)),
             chunks[0],
         );
-        let input = Paragraph::new(self.key_input.chars().map(|_| '•').collect::<String>())
+        let input = Paragraph::new(display_input)
             .block(
                 Block::default()
                     .borders(Borders::ALL)
@@ -153,7 +160,7 @@ impl AuthLoginScreen {
             frame.render_widget(Paragraph::new(self.status.clone()).style(s), chunks[2]);
         }
         frame.render_widget(
-            Paragraph::new("[Enter] submit  [Esc] back  [q] quit")
+            Paragraph::new(hint)
                 .style(Style::default().fg(c.dim))
                 .alignment(Alignment::Center),
             chunks[3],
@@ -163,7 +170,7 @@ impl AuthLoginScreen {
     pub fn handle_key(&mut self, key: KeyEvent) -> AuthAction {
         match &self.state {
             InputState::SelectingProvider => self.handle_select_keys(key),
-            InputState::EnteringKey { .. } => self.handle_input_keys(key),
+            InputState::EnteringKey { .. } | InputState::EnteringUrl { .. } => self.handle_input_keys(key),
         }
     }
 
@@ -184,9 +191,15 @@ impl AuthLoginScreen {
             }
             KeyCode::Enter => {
                 let info = &self.providers[self.selection];
-                self.state = InputState::EnteringKey {
-                    provider: info.key.clone(),
-                };
+                if info.requires_api_key {
+                    self.state = InputState::EnteringKey {
+                        provider: info.key.clone(),
+                    };
+                } else {
+                    self.state = InputState::EnteringUrl {
+                        provider: info.key.clone(),
+                    };
+                }
                 self.key_input.clear();
                 self.status.clear();
                 AuthAction::Continue
@@ -205,22 +218,38 @@ impl AuthLoginScreen {
                 AuthAction::Continue
             }
             KeyCode::Enter => {
-                if let InputState::EnteringKey { provider } = &self.state {
-                    let p = provider.clone();
-                    let k = self.key_input.clone();
-                    match self.save(&p, &k) {
-                        Ok(()) => {
-                            self.status = format!("✓ Authenticated with {}", p);
-                            self.state = InputState::SelectingProvider;
-                            AuthAction::Done
-                        }
-                        Err(e) => {
-                            self.status = format!("Error: {}", e);
-                            AuthAction::Continue
+                match &self.state {
+                    InputState::EnteringKey { provider } => {
+                        let p = provider.clone();
+                        let k = self.key_input.clone();
+                        match self.save_api_key(&p, &k) {
+                            Ok(()) => {
+                                self.status = format!("✓ Authenticated with {}", p);
+                                self.state = InputState::SelectingProvider;
+                                AuthAction::Done
+                            }
+                            Err(e) => {
+                                self.status = format!("Error: {}", e);
+                                AuthAction::Continue
+                            }
                         }
                     }
-                } else {
-                    AuthAction::Continue
+                    InputState::EnteringUrl { provider } => {
+                        let p = provider.clone();
+                        let url = self.key_input.clone();
+                        match self.save_base_url(&p, &url) {
+                            Ok(()) => {
+                                self.status = format!("✓ Configured {} with base URL", p);
+                                self.state = InputState::SelectingProvider;
+                                AuthAction::Done
+                            }
+                            Err(e) => {
+                                self.status = format!("Error: {}", e);
+                                AuthAction::Continue
+                            }
+                        }
+                    }
+                    InputState::SelectingProvider => AuthAction::Continue,
                 }
             }
             KeyCode::Char(c) => {
@@ -236,21 +265,42 @@ impl AuthLoginScreen {
     }
 
     pub fn handle_paste(&mut self, text: String) {
-        if matches!(self.state, InputState::EnteringKey { .. }) {
+        if matches!(self.state, InputState::EnteringKey { .. } | InputState::EnteringUrl { .. }) {
             let clean: String = text.chars().filter(|&c| c != '\n' && c != '\r').collect();
             self.key_input.push_str(&clean);
         }
     }
 
-    fn save(&mut self, provider: &str, api_key: &str) -> Result<()> {
+    fn save_api_key(&mut self, provider: &str, api_key: &str) -> Result<()> {
         let key = api_key.trim();
         if key.is_empty() {
             return Err(anyhow::anyhow!("API key cannot be empty"));
         }
+        let existing = self.store.get(provider).cloned().unwrap_or_default();
         self.store.set(
             provider.to_string(),
             Credentials {
                 api_key: key.to_string(),
+                base_url: existing.base_url,
+            },
+        );
+        self.store.save()
+    }
+
+    fn save_base_url(&mut self, provider: &str, url: &str) -> Result<()> {
+        let trimmed = url.trim();
+        if trimmed.is_empty() {
+            return Err(anyhow::anyhow!("Base URL cannot be empty"));
+        }
+        if !trimmed.starts_with("http://") && !trimmed.starts_with("https://") {
+            return Err(anyhow::anyhow!("Base URL must start with http:// or https://"));
+        }
+        let existing = self.store.get(provider).cloned().unwrap_or_default();
+        self.store.set(
+            provider.to_string(),
+            Credentials {
+                api_key: existing.api_key,
+                base_url: Some(trimmed.to_string()),
             },
         );
         self.store.save()

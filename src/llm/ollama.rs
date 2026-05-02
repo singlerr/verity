@@ -50,6 +50,10 @@ impl OllamaProvider {
         }
     }
 
+    pub fn set_base_url(&mut self, url: String) {
+        self.base_url = url;
+    }
+
     fn role_to_string(role: &Role) -> String {
         match role {
             Role::System => "system".to_string(),

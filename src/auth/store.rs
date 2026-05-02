@@ -11,7 +11,10 @@ use std::path::PathBuf;
 /// Per-provider credentials.
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct Credentials {
+    #[serde(default)]
     pub api_key: String,
+    #[serde(default)]
+    pub base_url: Option<String>,
 }
 
 /// Authentication status for a provider.
@@ -90,7 +93,7 @@ impl CredentialStore {
     /// Gets the authentication status for a provider.
     pub fn status(&self, provider: &str) -> AuthStatus {
         match self.credentials.get(provider) {
-            Some(creds) if !creds.api_key.is_empty() => AuthStatus::Authenticated,
+            Some(creds) if !creds.api_key.is_empty() || creds.base_url.is_some() => AuthStatus::Authenticated,
             _ => AuthStatus::NotAuthenticated,
         }
     }
@@ -137,6 +140,7 @@ mod tests {
             "openai".to_string(),
             Credentials {
                 api_key: "sk-test".to_string(),
+                base_url: None,
             },
         );
         assert_eq!(
@@ -147,12 +151,27 @@ mod tests {
     }
 
     #[test]
+    fn test_set_and_get_ollama_base_url() {
+        let mut store = CredentialStore::default();
+        store.set(
+            "ollama".to_string(),
+            Credentials {
+                api_key: String::new(),
+                base_url: Some("http://192.168.1.100:11434".to_string()),
+            },
+        );
+        assert!(store.get("ollama").expect("should exist").base_url.is_some());
+        assert_eq!(store.status("ollama"), AuthStatus::Authenticated);
+    }
+
+    #[test]
     fn test_remove() {
         let mut store = CredentialStore::default();
         store.set(
             "openai".to_string(),
             Credentials {
                 api_key: "sk-test".to_string(),
+                base_url: None,
             },
         );
         store.remove("openai");

@@ -295,6 +295,7 @@ impl LlmProvider for NvidiaProvider {
             PROVIDER_NAME.to_string(),
             Credentials {
                 api_key: api_key.to_string(),
+                base_url: None,
             },
         );
         store.save().map_err(|e| format!("Failed to save: {}", e))?;

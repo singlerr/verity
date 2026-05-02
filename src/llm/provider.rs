@@ -120,6 +120,9 @@ pub trait LlmProvider: Send + Sync {
     fn supports_tool_calling(&self) -> bool {
         false
     }
+    fn set_base_url(&mut self, _url: String) {
+        // Default no-op; only Ollama supports this
+    }
 }
 
 /// A thread-safe handle to a provider instance using trait objects
